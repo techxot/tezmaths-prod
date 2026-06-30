@@ -17,4 +17,16 @@ const verifyFirebaseToken = async (req, res, next) => {
   }
 };
 
-module.exports = { verifyFirebaseToken };
+const verifyAdmin = async (req, res, next) => {
+  // First verify the token
+  verifyFirebaseToken(req, res, (err) => {
+    if (err) return; // verifyFirebaseToken already sent response
+    // Check admin
+    if (req.user.admin === true || req.user.email === "tezmaths@admin.com") {
+      return next();
+    }
+    return res.status(403).json({ error: { message: "Admin access required", status: "FORBIDDEN" } });
+  });
+};
+
+module.exports = { verifyFirebaseToken, verifyAdmin };
