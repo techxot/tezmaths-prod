@@ -47,7 +47,10 @@ async function getUsers({ page = 1, limit = 50, search = "" } = {}) {
   const startIndex = (safePage - 1) * limit;
   const users = filtered.slice(startIndex, startIndex + limit);
 
-  return { users, total, page: safePage, limit, totalPages };
+  // Global stats (across all users, not just current page)
+  const contactsOkCount = cachedUsers.filter((u) => u.contacts?.permissionGranted).length;
+
+  return { users, total, page: safePage, limit, totalPages, contactsOkCount };
 }
 
 function invalidateCache() {
