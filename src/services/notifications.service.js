@@ -76,7 +76,7 @@ async function sendToAllUsers(title, message, redirect = "") {
       failure += response.failureCount;
 
       // Clean up invalid tokens using the pre-built reverse map
-      // No need to re-read the entire fcmTokens node — O(1) lookup per failed token
+      // O(1) lookup per failed token to find the owning userId
       const removeOps = [];
       response.responses.forEach((r, idx) => {
         if (!r.success) {
@@ -93,7 +93,6 @@ async function sendToAllUsers(title, message, redirect = "") {
             const userId = tokenToUser[failedToken];
             if (userId) {
               removeOps.push(
-                db.ref(`fcmTokens/${userId}`).remove(),
                 db.ref(`users/${userId}/fcmToken`).remove()
               );
               console.log(`Queued stale token removal for user: ${userId}`);
@@ -106,7 +105,7 @@ async function sendToAllUsers(title, message, redirect = "") {
       if (removeOps.length > 0) {
         try {
           await Promise.all(removeOps);
-          console.log(`Removed ${removeOps.length / 2} stale token(s)`);
+          console.log(`Removed ${removeOps.length} stale token(s)`);
         } catch (cleanupErr) {
           console.error("Stale token cleanup failed:", cleanupErr.message);
         }

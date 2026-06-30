@@ -1,0 +1,305 @@
+{
+  "rules": {
+    "appConfig": {
+      ".read": true,
+      ".write": "auth != null && auth.token.admin === true"
+    },
+    "practiceTopics": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      "$topicId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "practiceQuestions": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      "$topicId": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "$level": {
+          ".read": "auth != null",
+          ".write": "auth != null"
+        }
+      }
+    },
+    "practiceTimerDurations": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "practiceLevelSettings": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "practiceUserData": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "practiceSessions": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "practiceResults": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "practiceConfig": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "studyTopics": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "studyContents": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "lockStatus": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "notifications": {
+      ".indexOn": ["status"],
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "adSettings": {
+      ".read": "auth != null",
+      ".write": "auth != null && auth.token.admin === true"
+    },
+    "subscriptionPricing": {
+      ".read": "auth != null",
+      ".write": "auth != null && auth.token.admin === true"
+    },
+    "subscriptionPlans": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "featureLocks": {
+      ".read": "auth != null",
+      ".write": "auth != null && auth.token.admin === true"
+    },
+    "videosSectionLocked": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "admin": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": "auth != null && auth.token.admin === true"
+    },
+    "userRooms": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "usernames": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      "$username": {
+        ".read": "auth != null",
+        ".write": "auth != null && (!data.exists() || data.val() === auth.uid)"
+      }
+    },
+    "roomQuestions": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      "$roomId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "rooms": {
+      ".indexOn": ["code", "status", "hostId", "createdAt"],
+      ".read": "auth != null",
+      ".write": false,
+      "$roomId": {
+        ".read": "auth != null",
+        ".write": "auth != null && (!data.exists() || data.child('hostId').val() === auth.uid || data.child('players').hasChild(auth.uid))",
+        "players": {
+          ".indexOn": ["userId", "joinedAt"],
+          "$playerId": {
+            ".read": "auth != null",
+            ".write": "auth != null && (!newData.exists() || auth.uid === $playerId || root.child('rooms').child($roomId).child('hostId').val() === auth.uid)"
+          }
+        },
+        "status": {
+          ".write": "auth != null && root.child('rooms').child($roomId).child('hostId').val() === auth.uid"
+        },
+        "questions": {
+          ".write": "auth != null && root.child('rooms').child($roomId).child('hostId').val() === auth.uid"
+        },
+        "currentQuestion": {
+          ".write": "auth != null && root.child('rooms').child($roomId).child('hostId').val() === auth.uid"
+        },
+        "currentWinner": {
+          ".write": "auth != null && root.child('rooms').child($roomId).child('hostId').val() === auth.uid"
+        },
+        "questionStartedAt": {
+          ".write": "auth != null && root.child('rooms').child($roomId).child('hostId').val() === auth.uid"
+        },
+        "questionTransition": {
+          ".write": "auth != null && root.child('rooms').child($roomId).child('hostId').val() === auth.uid"
+        },
+        "nextQuestionStartTime": {
+          ".write": "auth != null && root.child('rooms').child($roomId).child('hostId').val() === auth.uid"
+        },
+        "lastActivity": {
+          ".write": "auth != null && (root.child('rooms').child($roomId).child('hostId').val() === auth.uid || root.child('rooms').child($roomId).child('players').hasChild(auth.uid))"
+        },
+        "gameEndReason": {
+          ".write": "auth != null && root.child('rooms').child($roomId).child('hostId').val() === auth.uid"
+        },
+        "results": {
+          ".write": "auth != null && root.child('rooms').child($roomId).child('hostId').val() === auth.uid"
+        },
+        "totalQuestions": {
+          ".write": "auth != null && root.child('rooms').child($roomId).child('hostId').val() === auth.uid"
+        },
+        "questionTimeLimit": {
+          ".write": "auth != null && root.child('rooms').child($roomId).child('hostId').val() === auth.uid"
+        },
+        "gameStartedAt": {
+          ".write": "auth != null && root.child('rooms').child($roomId).child('hostId').val() === auth.uid"
+        },
+        "finishedAt": {
+          ".write": "auth != null && root.child('rooms').child($roomId).child('hostId').val() === auth.uid"
+        },
+        "matchedPlayers": {
+          ".write": "auth != null && root.child('rooms').child($roomId).child('hostId').val() === auth.uid"
+        }
+      }
+    },
+    "matchmaking": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".indexOn": ["status", "createdAt", "hostId"],
+      "$matchId": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        ".validate": "newData.hasChildren(['hostId', 'status', 'playerCount', 'players'])",
+        "hostId": {
+          ".validate": "newData.isString() && newData.val() === auth.uid"
+        },
+        "status": {
+          ".validate": "newData.isString()"
+        },
+        "playerCount": {
+          ".validate": "newData.isNumber()"
+        },
+        "players": {
+          ".validate": "newData.hasChildren()",
+          "$playerId": {
+            ".validate": "newData.hasChildren(['userId', 'joinedAt'])",
+            "userId": {
+              ".validate": "newData.isString()"
+            },
+            "joinedAt": {
+              ".validate": "newData.isNumber()"
+            }
+          }
+        }
+      }
+    },
+    "presence": {
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    },
+    "achievements": {
+      ".read": "auth != null",
+      ".write": "auth != null && auth.token.admin === true",
+      ".indexOn": ["userId", "achievedAt"],
+      "$achievementId": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.token.admin === true"
+      }
+    },
+    "streakConfig": {
+      ".read": "auth != null",
+      ".write": "auth != null && auth.token.admin === true"
+    },
+    "leaderboardConfig": {
+      ".read": "auth != null",
+      ".write": "auth != null && auth.token.admin === true"
+    },
+    "quizzes": {
+      ".read": "auth != null",
+      ".write": "auth != null && auth.token.admin === true",
+      ".indexOn": ["level", "category", "difficulty"]
+    },
+    "videos": {
+      ".read": "auth != null",
+      ".write": "auth != null && auth.token.admin === true",
+      ".indexOn": ["category", "difficulty", "topicId"]
+    },
+    "users": {
+      ".read": "auth != null",
+      ".write": false,
+      ".indexOn": ["highScore", "xp", "totalPoints", "createdAt"],
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+        ".write": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+        "contacts": {
+          ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+          ".write": "auth != null && auth.uid === $uid"
+        },
+        "practiceProgress": {
+          ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+          ".write": "auth != null && (auth.uid === $uid || auth.token.admin === true)"
+        },
+        "practiceHistory": {
+          ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+          ".write": "auth != null && (auth.uid === $uid || auth.token.admin === true)"
+        },
+        "battleHistory": {
+          ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+          ".write": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+          ".indexOn": ["timestamp", "result"]
+        },
+        "achievements": {
+          ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+          ".write": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+          ".indexOn": ["achievedAt"],
+          "$achievementId": {
+            ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+            ".write": "auth != null && (auth.uid === $uid || auth.token.admin === true)"
+          }
+        },
+        "streakData": {
+          ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+          ".write": "auth != null && (auth.uid === $uid || auth.token.admin === true)"
+        },
+        "subscriptionStatus": {
+          ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+          ".write": "auth != null && (auth.uid === $uid || auth.token.admin === true)"
+        },
+        "isPremium": {
+          ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+          ".write": "auth != null && (auth.uid === $uid || auth.token.admin === true)"
+        },
+        "featureAccess": {
+          ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+          ".write": "auth != null && (auth.uid === $uid || auth.token.admin === true)"
+        },
+        "dailyLimits": {
+          ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+          ".write": "auth != null && (auth.uid === $uid || auth.token.admin === true)"
+        },
+        "notifications": {
+          ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+          ".write": "auth != null && (auth.uid === $uid || auth.token.admin === true)"
+        }
+      }
+    },
+    ".read": false,
+    ".write": false
+  }
+}
