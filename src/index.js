@@ -44,6 +44,14 @@ cron.schedule("*/10 * * * *", async () => {
     catch (e) { console.error("Cron error:", e.message); }
 }, { timezone: "Asia/Kolkata" });
 
+// ─── Database cleanup cron (every 6 hours) ───────────────────────────────────
+// Removes finished/abandoned rooms, orphaned roomQuestions, and old payment logs
+const { runCleanup } = require("./services/cleanup.service");
+cron.schedule("0 */6 * * *", async () => {
+    try { await runCleanup(); }
+    catch (e) { console.error("Cleanup cron error:", e.message); }
+}, { timezone: "Asia/Kolkata" });
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
