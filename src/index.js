@@ -36,9 +36,9 @@ app.use((err, req, res, _next) => {
     res.status(500).json({ error: { message: err.message || "Internal server error" } });
 });
 
-// ─── Scheduled notifications cron (every 10 minutes) ─────────────────────────
+// ─── Scheduled notifications cron (10 times per day — every 2.5 hours) ────────
 const { processScheduledNotifications } = require("./services/notifications.service");
-cron.schedule("*/10 * * * *", async () => {
+cron.schedule("0 6,8,10,12,14,16,18,20,22,0 * * *", async () => {
     console.log("Running scheduled notifications check...");
     try { await processScheduledNotifications(); }
     catch (e) { console.error("Cron error:", e.message); }

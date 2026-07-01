@@ -2,7 +2,7 @@ const { db } = require("../config/firebase");
 
 let cachedUsers = null;
 let cacheTimestamp = 0;
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours (1 day)
 
 /**
  * Fetches paginated, searchable user list for admin panel.

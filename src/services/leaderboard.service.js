@@ -2,7 +2,7 @@ const { db } = require("../config/firebase");
 
 let cachedLeaderboard = null;
 let cacheTimestamp = 0;
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes, configurable
+const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 /**
  * Computes the top-10 leaderboard and optionally includes the requesting user's rank.
