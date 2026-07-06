@@ -230,6 +230,13 @@
       ".read": "auth != null",
       ".write": "auth != null && auth.token.admin === true"
     },
+    "leaderboard": {
+      ".read": "auth != null",
+      ".indexOn": ["highScore"],
+      "$userId": {
+        ".write": "auth != null && auth.uid === $userId"
+      }
+    },
     "quizzes": {
       ".read": "auth != null",
       ".write": "auth != null && auth.token.admin === true",
