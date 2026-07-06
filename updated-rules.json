@@ -237,6 +237,12 @@
         ".write": "auth != null && auth.uid === $userId"
       }
     },
+    "fcmTokens": {
+      ".read": "auth != null",
+      "$userId": {
+        ".write": "auth != null && auth.uid === $userId"
+      }
+    },
     "quizzes": {
       ".read": "auth != null",
       ".write": "auth != null && auth.token.admin === true",
