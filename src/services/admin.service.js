@@ -58,4 +58,75 @@ function invalidateCache() {
   cacheTimestamp = 0;
 }
 
-module.exports = { getUsers, invalidateCache };
+/**
+ * Returns dashboard stats derived from the cached users (no extra Firebase read).
+ */
+async function getDashboardStats() {
+  // Ensure cache is populated
+  await getUsers({ page: 1, limit: 1 });
+
+  let totalUsers = cachedUsers.length;
+  let totalReferrals = 0;
+  let totalPoints = 0;
+
+  cachedUsers.forEach((u) => {
+    totalReferrals += u.referrals || 0;
+    totalPoints += u.totalPoints || 0;
+  });
+
+  // Get quizzes and videos count from Firebase (lightweight reads)
+  const [quizzesSnap, videosSnap] = await Promise.all([
+    db.ref("quizzes").once("value"),
+    db.ref("videos").once("value"),
+  ]);
+
+  const totalQuizzes = quizzesSnap.exists() ? Object.keys(quizzesSnap.val()).length : 0;
+  const totalVideos = videosSnap.exists() ? Object.keys(videosSnap.val()).length : 0;
+
+  return {
+    totalUsers,
+    totalReferrals,
+    totalReferralPoints: totalReferrals * 10,
+    totalQuizzes,
+    totalVideos,
+    totalPointsDistributed: totalPoints,
+  };
+}
+
+/**
+ * Returns referral rankings derived from cached users.
+ */
+async function getReferralStats() {
+  // Ensure cache is populated
+  await getUsers({ page: 1, limit: 1 });
+
+  let totalUsers = cachedUsers.length;
+  let totalReferrals = 0;
+  const referrers = [];
+
+  cachedUsers.forEach((u) => {
+    const r = u.referrals || 0;
+    totalReferrals += r;
+    if (r > 0) {
+      referrers.push({
+        userId: u.id,
+        username: u.username || u.fullName || "Unknown",
+        referrals: r,
+        points: r * 10,
+      });
+    }
+  });
+
+  // Sort by referrals descending, take top 20
+  referrers.sort((a, b) => b.referrals - a.referrals);
+  const topReferrers = referrers.slice(0, 20);
+
+  return {
+    totalUsers,
+    totalReferrals,
+    totalReferralPoints: totalReferrals * 10,
+    topReferrers,
+  };
+}
+
+module.exports = { getUsers, invalidateCache, getDashboardStats, getReferralStats };

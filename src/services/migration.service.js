@@ -79,12 +79,49 @@ async function migrateFcmTokens() {
     }
   }
 
-  // Only remove fcmTokens node if ALL tokens are verified present in users
-  if (allPresent) {
-    await db.ref("fcmTokens").remove();
-  }
+  // DISABLED: Do NOT remove fcmTokens node — it's now the primary source for notifications.service.js
+  // The old migration logic that deleted /fcmTokens is no longer valid.
+  // if (allPresent) {
+  //   await db.ref("fcmTokens").remove();
+  // }
 
-  return { totalTokens, copiedCount, removed: allPresent };
+  return { totalTokens, copiedCount, removed: false, message: "fcmTokens removal disabled — node is now used by notifications service" };
 }
 
-module.exports = { migrateUsernameIndex, migrateFcmTokens };
+/**
+ * Populates the `quizLevels` node from existing quiz data.
+ * Reads the `quizzes` node, extracts all unique level numbers,
+ * and writes a lightweight map: `quizLevels/{level}: true`.
+ *
+ * This allows clients to fetch available levels (~100 bytes)
+ * without downloading the entire quizzes node (~2MB).
+ *
+ * @returns {{ levels: number[], count: number }}
+ */
+async function migrateQuizLevels() {
+  const snapshot = await db.ref("quizzes").once("value");
+  if (!snapshot.exists()) return { levels: [], count: 0 };
+
+  const levelsSet = new Set();
+
+  snapshot.forEach((child) => {
+    const quiz = child.val();
+    if (quiz && quiz.level) {
+      levelsSet.add(Number(quiz.level));
+    }
+  });
+
+  const levels = Array.from(levelsSet).sort((a, b) => a - b);
+
+  if (levels.length > 0) {
+    const updates = {};
+    for (const level of levels) {
+      updates[`quizLevels/${level}`] = true;
+    }
+    await db.ref().update(updates);
+  }
+
+  return { levels, count: levels.length };
+}
+
+module.exports = { migrateUsernameIndex, migrateFcmTokens, migrateQuizLevels };
