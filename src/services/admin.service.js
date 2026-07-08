@@ -110,7 +110,8 @@ async function getReferralStats() {
     if (r > 0) {
       referrers.push({
         userId: u.id,
-        username: u.username || u.fullName || "Unknown",
+        username: u.username || "Unknown",
+        fullName: u.fullName || u.username || "Unknown",
         referrals: r,
         points: r * 10,
       });
