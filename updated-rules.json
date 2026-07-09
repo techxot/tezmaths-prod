@@ -248,6 +248,10 @@
       ".write": "auth != null && auth.token.admin === true",
       ".indexOn": ["level", "category", "difficulty"]
     },
+    "quizLevels": {
+      ".read": "auth != null",
+      ".write": "auth != null && auth.token.admin === true"
+    },
     "videos": {
       ".read": "auth != null",
       ".write": "auth != null && auth.token.admin === true",
