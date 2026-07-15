@@ -61,6 +61,11 @@ function invalidateCache() {
 /**
  * Returns dashboard stats derived from the cached users (no extra Firebase read).
  */
+let cachedQuizCount = null;
+let cachedVideoCount = null;
+let contentCacheTimestamp = 0;
+const CONTENT_CACHE_TTL = 12 * 60 * 60 * 1000; // 12 hours
+
 async function getDashboardStats() {
   // Ensure cache is populated
   await getUsers({ page: 1, limit: 1 });
@@ -74,21 +79,24 @@ async function getDashboardStats() {
     totalPoints += u.totalPoints || 0;
   });
 
-  // Get quizzes and videos count from Firebase (lightweight reads)
-  const [quizzesSnap, videosSnap] = await Promise.all([
-    db.ref("quizzes").once("value"),
-    db.ref("videos").once("value"),
-  ]);
-
-  const totalQuizzes = quizzesSnap.exists() ? Object.keys(quizzesSnap.val()).length : 0;
-  const totalVideos = videosSnap.exists() ? Object.keys(videosSnap.val()).length : 0;
+  // Cache quiz/video counts — avoid downloading full nodes every call
+  const now = Date.now();
+  if (cachedQuizCount === null || now - contentCacheTimestamp > CONTENT_CACHE_TTL) {
+    const [quizzesSnap, videosSnap] = await Promise.all([
+      db.ref("quizzes").once("value"),
+      db.ref("videos").once("value"),
+    ]);
+    cachedQuizCount = quizzesSnap.exists() ? Object.keys(quizzesSnap.val()).length : 0;
+    cachedVideoCount = videosSnap.exists() ? Object.keys(videosSnap.val()).length : 0;
+    contentCacheTimestamp = now;
+  }
 
   return {
     totalUsers,
     totalReferrals,
     totalReferralPoints: totalReferrals * 10,
-    totalQuizzes,
-    totalVideos,
+    totalQuizzes: cachedQuizCount,
+    totalVideos: cachedVideoCount,
     totalPointsDistributed: totalPoints,
   };
 }
