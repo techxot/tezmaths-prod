@@ -139,25 +139,34 @@ async function getDashboardStats() {
   const now = Date.now();
   if (cachedQuizCount === null || now - contentCacheTimestamp > CONTENT_CACHE_TTL) {
     try {
-      // Shallow read only returns keys — downloads ~2 KB instead of 9 MB
-      const databaseURL = process.env.FIREBASE_DATABASE_URL;
-      const [quizRes, videoRes] = await Promise.all([
-        fetch(`${databaseURL}/quizzes.json?shallow=true`),
-        fetch(`${databaseURL}/videos.json?shallow=true`),
-      ]);
-      const quizKeys = await quizRes.json();
-      const videoKeys = await videoRes.json();
-      cachedQuizCount = quizKeys ? Object.keys(quizKeys).length : 0;
-      cachedVideoCount = videoKeys ? Object.keys(videoKeys).length : 0;
+      // Read from lightweight counter node (~20 bytes)
+      const countsSnap = await db.ref("_counts").once("value");
+
+      if (countsSnap.exists()) {
+        const counts = countsSnap.val();
+        cachedQuizCount = counts.quizzes || 0;
+        cachedVideoCount = counts.videos || 0;
+      } else {
+        // Counter doesn't exist — initialize it using numChildren (downloads keys only, not full values)
+        // Admin SDK numChildren still needs the snapshot, but this only happens ONCE ever
+        const [quizzesSnap, videosSnap] = await Promise.all([
+          db.ref("quizzes").once("value"),
+          db.ref("videos").once("value"),
+        ]);
+        cachedQuizCount = quizzesSnap.exists() ? quizzesSnap.numChildren() : 0;
+        cachedVideoCount = videosSnap.exists() ? videosSnap.numChildren() : 0;
+
+        // Persist counter so this heavy read never happens again
+        await db.ref("_counts").set({
+          quizzes: cachedQuizCount,
+          videos: cachedVideoCount,
+        });
+        console.log(`[admin.service] _counts initialized: quizzes=${cachedQuizCount}, videos=${cachedVideoCount}`);
+      }
     } catch (error) {
-      // Fallback: if shallow read fails, use numChildren via SDK (still downloads keys only)
-      console.warn("[admin.service] Shallow read failed, using fallback:", error.message);
-      const [quizzesSnap, videosSnap] = await Promise.all([
-        db.ref("quizzes").once("value"),
-        db.ref("videos").once("value"),
-      ]);
-      cachedQuizCount = quizzesSnap.exists() ? quizzesSnap.numChildren() : 0;
-      cachedVideoCount = videosSnap.exists() ? videosSnap.numChildren() : 0;
+      console.warn("[admin.service] Content count read failed:", error.message);
+      cachedQuizCount = cachedQuizCount || 0;
+      cachedVideoCount = cachedVideoCount || 0;
     }
     contentCacheTimestamp = now;
   }
