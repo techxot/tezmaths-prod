@@ -18,21 +18,35 @@ const ADMIN_FIELDS = [
 
 /**
  * Strips a user object to only admin-needed fields.
- * This reduces per-user memory from ~700 bytes to ~300 bytes (no contacts array, no progress maps).
+ * Handles BOTH old flat structure AND new split subnode structure:
+ *   users/{uid}/profile/ + stats/ + progress/ + meta/
  */
 function stripUserToAdminFields(id, user) {
+  // Merge subnodes into flat object if split structure is detected
+  let flat = user;
+  if (user.profile || user.stats || user.progress || user.meta) {
+    flat = {
+      ...(user.profile || {}),
+      ...(user.stats || {}),
+      ...(user.progress || {}),
+      ...(user.meta || {}),
+    };
+    // Also keep contacts at root level (not inside subnodes)
+    if (user.contacts) flat.contacts = user.contacts;
+  }
+
   const stripped = { id };
   for (const field of ADMIN_FIELDS) {
     if (field === 'id') continue;
-    if (user[field] !== undefined) {
-      stripped[field] = user[field];
+    if (flat[field] !== undefined) {
+      stripped[field] = flat[field];
     }
   }
   // Special: only keep contacts permission status, not the full contacts array
-  if (user.contacts) {
+  if (flat.contacts) {
     stripped.contacts = {
-      permissionGranted: user.contacts.permissionGranted || false,
-      totalCount: user.contacts.totalCount || 0,
+      permissionGranted: flat.contacts.permissionGranted || false,
+      totalCount: flat.contacts.totalCount || 0,
     };
   }
   return stripped;
