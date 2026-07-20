@@ -1,11 +1,11 @@
 const express = require("express");
 const router = express.Router();
-const { verifyFirebaseToken } = require("../middlewares/firebaseAuth.middleware");
+const { verifyFirebaseToken, verifyAdmin } = require("../middlewares/firebaseAuth.middleware");
 const { sendToAllUsers } = require("../services/notifications.service");
 const { db } = require("../config/firebase");
 
 // ─── POST /api/notifications/send ────────────────────────────────────────────
-router.post("/send", verifyFirebaseToken, async (req, res) => {
+router.post("/send", verifyAdmin, async (req, res) => {
   try {
     const { title, message, redirect = "" } = req.body.data || req.body;
 
@@ -39,7 +39,7 @@ router.post("/send", verifyFirebaseToken, async (req, res) => {
 });
 
 // ─── POST /api/notifications/schedule ────────────────────────────────────────
-router.post("/schedule", verifyFirebaseToken, async (req, res) => {
+router.post("/schedule", verifyAdmin, async (req, res) => {
   try {
     const { title, message, redirect = "", scheduledTime } = req.body.data || req.body;
 
@@ -65,7 +65,7 @@ router.post("/schedule", verifyFirebaseToken, async (req, res) => {
 });
 
 // ─── DELETE /api/notifications/:notifId ──────────────────────────────────────
-router.delete("/:notifId", verifyFirebaseToken, async (req, res) => {
+router.delete("/:notifId", verifyAdmin, async (req, res) => {
   try {
     const { notifId } = req.params;
     await db.ref(`notifications/${notifId}`).remove();
@@ -77,7 +77,7 @@ router.delete("/:notifId", verifyFirebaseToken, async (req, res) => {
 });
 
 // ─── POST /api/notifications/resend ──────────────────────────────────────────
-router.post("/resend", verifyFirebaseToken, async (req, res) => {
+router.post("/resend", verifyAdmin, async (req, res) => {
   try {
     const { notifId, title, message, redirect = "" } = req.body.data || req.body;
 
