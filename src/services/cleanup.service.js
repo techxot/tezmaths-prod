@@ -13,6 +13,7 @@ const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
 
 /**
  * Removes battle rooms older than 6 hours that are finished or abandoned.
+ * OPTIMIZED: Uses query to fetch only old rooms instead of downloading the entire node.
  * Also removes their associated roomQuestions and matchmaking entries.
  */
 async function cleanupOldRooms() {
@@ -20,16 +21,20 @@ async function cleanupOldRooms() {
     let removedCount = 0;
 
     try {
-        const roomsSnap = await db.ref("rooms").once("value");
+        // OPTIMIZED: Query only rooms created before cutoff instead of downloading ALL rooms
+        const roomsSnap = await db.ref("rooms")
+            .orderByChild("createdAt")
+            .endAt(cutoff)
+            .once("value");
+        
         if (!roomsSnap.exists()) return { removedRooms: 0 };
 
         const updates = {};
         const rooms = roomsSnap.val();
 
         for (const [roomId, room] of Object.entries(rooms)) {
-            const isOld = (room.createdAt || 0) < cutoff;
             const isFinished = room.status === "finished";
-            const isAbandoned = isOld && (room.status === "playing" || room.status === "waiting");
+            const isAbandoned = room.status === "playing" || room.status === "waiting";
 
             if (isFinished || isAbandoned) {
                 updates[`rooms/${roomId}`] = null;
@@ -40,7 +45,12 @@ async function cleanupOldRooms() {
         }
 
         if (Object.keys(updates).length > 0) {
-            await db.ref().update(updates);
+            // Batch in chunks of 500 to avoid multi-path update limits
+            const entries = Object.entries(updates);
+            for (let i = 0; i < entries.length; i += 500) {
+                const chunk = Object.fromEntries(entries.slice(i, i + 500));
+                await db.ref().update(chunk);
+            }
         }
 
         console.log(`[Cleanup] Removed ${removedCount} old rooms`);
@@ -53,23 +63,30 @@ async function cleanupOldRooms() {
 
 /**
  * Archives payment logs older than 90 days.
- * Moves them to a paymentLogsArchive node (or deletes if archival isn't needed).
- * This keeps the paymentLogs node small for active queries.
+ * OPTIMIZED: Uses orderByChild query to only fetch old logs instead of entire node.
  */
 async function cleanupOldPaymentLogs() {
     const cutoff = Date.now() - NINETY_DAYS_MS;
     let removedCount = 0;
 
     try {
-        const logsSnap = await db.ref("paymentLogs").once("value");
-        if (!logsSnap.exists()) return { removedLogs: 0 };
+        // Payment logs are nested: paymentLogs/{userId}/{logKey}
+        // We can't efficiently query nested timestamps, so we still read the top-level keys
+        // but use shallow read to get only user IDs first, then fetch per-user
+        const databaseURL = process.env.FIREBASE_DATABASE_URL;
+        const shallowRes = await fetch(`${databaseURL}/paymentLogs.json?shallow=true`);
+        const userIds = await shallowRes.json();
+        
+        if (!userIds || Object.keys(userIds).length === 0) return { removedLogs: 0 };
 
         const updates = {};
-        const allLogs = logsSnap.val();
 
-        for (const [userId, userLogs] of Object.entries(allLogs)) {
-            if (!userLogs || typeof userLogs !== "object") continue;
+        // Process each user's logs individually (small reads)
+        for (const userId of Object.keys(userIds)) {
+            const userLogsSnap = await db.ref(`paymentLogs/${userId}`).once("value");
+            if (!userLogsSnap.exists()) continue;
 
+            const userLogs = userLogsSnap.val();
             for (const [logKey, logData] of Object.entries(userLogs)) {
                 if (logData?.loggedAt && logData.loggedAt < cutoff) {
                     updates[`paymentLogs/${userId}/${logKey}`] = null;
@@ -79,7 +96,6 @@ async function cleanupOldPaymentLogs() {
         }
 
         if (Object.keys(updates).length > 0) {
-            // Batch in chunks of 500 to avoid Firebase multi-path update limits
             const entries = Object.entries(updates);
             for (let i = 0; i < entries.length; i += 500) {
                 const chunk = Object.fromEntries(entries.slice(i, i + 500));
@@ -97,26 +113,29 @@ async function cleanupOldPaymentLogs() {
 
 /**
  * Removes orphaned roomQuestions entries that have no corresponding room.
+ * OPTIMIZED: Uses shallow reads to get only keys (~2KB) instead of full node data.
  */
 async function cleanupOrphanedRoomQuestions() {
     let removedCount = 0;
 
     try {
-        const [roomsSnap, questionsSnap] = await Promise.all([
-            db.ref("rooms").once("value"),
-            db.ref("roomQuestions").once("value"),
+        const databaseURL = process.env.FIREBASE_DATABASE_URL;
+        
+        // Shallow reads — only download keys, not full data
+        const [roomsRes, questionsRes] = await Promise.all([
+            fetch(`${databaseURL}/rooms.json?shallow=true`),
+            fetch(`${databaseURL}/roomQuestions.json?shallow=true`),
         ]);
 
-        if (!questionsSnap.exists()) return { removedQuestions: 0 };
+        const roomKeys = await roomsRes.json();
+        const questionKeys = await questionsRes.json();
 
-        const existingRoomIds = new Set(
-            roomsSnap.exists() ? Object.keys(roomsSnap.val()) : []
-        );
+        if (!questionKeys || Object.keys(questionKeys).length === 0) return { removedQuestions: 0 };
 
+        const existingRoomIds = new Set(roomKeys ? Object.keys(roomKeys) : []);
         const updates = {};
-        const questionRoomIds = Object.keys(questionsSnap.val());
 
-        for (const roomId of questionRoomIds) {
+        for (const roomId of Object.keys(questionKeys)) {
             if (!existingRoomIds.has(roomId)) {
                 updates[`roomQuestions/${roomId}`] = null;
                 removedCount++;

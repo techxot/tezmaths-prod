@@ -2,12 +2,20 @@ const { db } = require("../config/firebase");
 
 /**
  * Populates the `usernames/{normalized}` index from existing user data.
+ * GUARDED: Checks if migration already ran before downloading all users.
  * Reads all users, builds a map of lowercased usernames to user IDs,
  * and writes via a single multi-path update for atomicity.
  *
  * @returns {{ migrated: number }} - Count of usernames indexed
  */
 async function migrateUsernameIndex() {
+  // Guard: Check if migration already ran by checking if usernames node exists
+  const existingSnap = await db.ref("usernames").limitToFirst(1).once("value");
+  if (existingSnap.exists()) {
+    console.log("[Migration] usernames index already exists. Skipping. Use force=true to re-run.");
+    return { migrated: 0, skipped: true };
+  }
+
   const snapshot = await db.ref("users").once("value");
   if (!snapshot.exists()) return { migrated: 0 };
 

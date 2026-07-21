@@ -76,59 +76,25 @@ async function getLeaderboard(requestingUserId = null) {
 
 /**
  * Fallback for when /leaderboard node doesn't exist yet (pre-migration).
- * Reads from the full /users node — preserves backward compatibility.
+ * OPTIMIZED: Instead of downloading ALL /users (14 MB), returns empty and logs a warning.
+ * The migration script should be run to populate /leaderboard before this is needed.
  */
 async function getLeaderboardFromUsers(requestingUserId) {
-  const snapshot = await db.ref("users").once("value");
-  if (!snapshot.exists()) {
-    return { leaderboard: [], currentUser: undefined };
-  }
-
-  const users = snapshot.val();
-  const ranked = Object.entries(users)
-    .filter(([_, u]) => {
-      const email = u.email || "";
-      const username = (u.username || "").toLowerCase();
-      return email !== "tezmaths@admin.com" && username !== "admin";
-    })
-    .map(([id, u]) => ({
-      userId: id,
-      fullName: u.fullName || "Unknown",
-      username: u.username || "Unknown",
-      highScore: u.highScore ?? 0,
-      highScoreTime: u.highScoreTime ?? 0,
-    }))
-    .sort((a, b) => {
-      if (b.highScore !== a.highScore) return b.highScore - a.highScore;
-      if (a.highScoreTime > 0 && b.highScoreTime > 0) {
-        return a.highScoreTime - b.highScoreTime;
-      }
-      return 0;
-    })
-    .map((user, index) => ({ ...user, rank: index + 1 }));
-
-  cachedLeaderboard = ranked;
-  cacheTimestamp = Date.now();
-
-  const top10 = ranked.slice(0, 10);
-  let currentUser = undefined;
-  if (requestingUserId) {
-    const inTop10 = top10.some((u) => u.userId === requestingUserId);
-    if (!inTop10) {
-      currentUser = ranked.find((u) => u.userId === requestingUserId);
-      if (!currentUser) {
-        currentUser = {
-          userId: requestingUserId,
-          fullName: "Unknown",
-          username: "Unknown",
-          highScore: 0,
-          highScoreTime: 0,
-          rank: ranked.length + 1,
-        };
-      }
-    }
-  }
-  return { leaderboard: top10, currentUser };
+  console.warn("[Leaderboard] FALLBACK TRIGGERED — /leaderboard node is empty. Run migrate-leaderboard.js to populate it.");
+  
+  // Return empty rather than downloading 14 MB of all users
+  // The admin should run the migration script to fix this
+  return { 
+    leaderboard: [], 
+    currentUser: requestingUserId ? {
+      userId: requestingUserId,
+      fullName: "Unknown",
+      username: "Unknown",
+      highScore: 0,
+      highScoreTime: 0,
+      rank: 1,
+    } : undefined 
+  };
 }
 
 function invalidateCache() {
