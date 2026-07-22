@@ -2,20 +2,20 @@ const { admin, db } = require("../config/firebase");
 
 async function sendToAllUsers(title, message, redirect = "") {
   try {
-    // Pull tokens from the 'users' node because older app versions 
-    // only saved it there, or the fcmTokens node might have been cleared.
-    const snap = await db.ref("users").once("value");
-    if (!snap.exists()) {
-      console.log("No FCM tokens found");
+    // Read from lightweight /fcmTokens/{userId} index instead of full /users (saves ~17MB)
+    const tokensSnap = await db.ref("fcmTokens").once("value");
+    
+    if (!tokensSnap.exists()) {
+      console.log("No FCM tokens found in /fcmTokens index");
       return { sent: 0, failure: 0 };
     }
 
     const tokenToUser = {};
-    const rawData = snap.val();
+    const rawTokens = tokensSnap.val();
     
-    for (const [userId, userData] of Object.entries(rawData)) {
-      if (userData && userData.fcmToken) {
-        tokenToUser[userData.fcmToken] = userId;
+    for (const [userId, token] of Object.entries(rawTokens)) {
+      if (token && typeof token === "string") {
+        tokenToUser[token] = userId;
       }
     }
 
