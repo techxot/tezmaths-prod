@@ -8,44 +8,35 @@
  *
  * Run with: node migrate-user-nodes.js
  *
- * Target: STAGING database (tezmaths-staging)
+ * Uses the same Firebase credentials from .env as the backend server.
  */
 require("dotenv").config();
 const admin = require("firebase-admin");
 
-// ─── Initialize with staging credentials ─────────────────────────────────────
-const stagingConfig = {
-  projectId: "tezmaths-staging",
-  databaseURL: "https://tezmaths-staging-default-rtdb.asia-southeast1.firebasedatabase.app",
-  clientEmail: "firebase-adminsdk-fbsvc@tezmaths-staging.iam.gserviceaccount.com",
-  // Use the staging private key from .env (commented section) or inline
-  privateKey: process.env.FIREBASE_PRIVATE_KEY
-    ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n")
-    : null,
-};
+// ─── Initialize using same .env vars as the backend ───────────────────────────
+const { FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY, FIREBASE_DATABASE_URL } = process.env;
 
-// If .env has production keys, override for staging manually
-// Uncomment the staging block in .env before running this script, OR
-// set STAGING_PRIVATE_KEY environment variable
-const privateKey = process.env.STAGING_PRIVATE_KEY
-  ? process.env.STAGING_PRIVATE_KEY.replace(/\\n/g, "\n")
-  : stagingConfig.privateKey;
+if (!FIREBASE_PROJECT_ID || !FIREBASE_CLIENT_EMAIL || !FIREBASE_PRIVATE_KEY || !FIREBASE_DATABASE_URL) {
+  console.error("ERROR: Missing Firebase credentials in .env");
+  console.error("Required: FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY, FIREBASE_DATABASE_URL");
+  process.exit(1);
+}
 
-if (!privateKey || !privateKey.includes("BEGIN PRIVATE KEY")) {
-  console.error("ERROR: No valid private key found.");
-  console.error("Make sure .env has staging Firebase credentials uncommented,");
-  console.error("or set STAGING_PRIVATE_KEY environment variable.");
+const privateKey = FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n");
+
+if (!privateKey.includes("BEGIN PRIVATE KEY")) {
+  console.error("ERROR: FIREBASE_PRIVATE_KEY is malformed — missing 'BEGIN PRIVATE KEY'");
   process.exit(1);
 }
 
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert({
-      projectId: stagingConfig.projectId,
-      clientEmail: stagingConfig.clientEmail,
-      privateKey: privateKey,
+      projectId: FIREBASE_PROJECT_ID,
+      clientEmail: FIREBASE_CLIENT_EMAIL,
+      privateKey,
     }),
-    databaseURL: stagingConfig.databaseURL,
+    databaseURL: FIREBASE_DATABASE_URL,
   });
 }
 
