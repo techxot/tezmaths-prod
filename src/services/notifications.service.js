@@ -28,38 +28,29 @@ async function sendToAllUsers(title, message, redirect = "") {
       token,
       notification: { title, body: message },
       data: { redirect: redirect || "" },
-
-      // ── Android config ────────────────────────────────────────────────────────
       android: {
-        priority: "high",                   // wake up device even in Doze mode
+        priority: "high",
         notification: {
           sound: "default",
-          channelId: "default-v2",           // MUST match channel created in notificationService.js
+          channelId: "default-v2",
           priority: "high",
           defaultSound: true,
           defaultVibrateTimings: true,
           notificationCount: 1,
         },
       },
-
-      // ── iOS / APNs config ─────────────────────────────────────────────────────
-      // CRITICAL: Without this block, iOS devices receive nothing.
-      // FCM requires explicit APNs headers for iOS push delivery.
       apns: {
         headers: {
-          "apns-priority": "10",          // 10 = immediate delivery (vs 5 = power-saving)
-          "apns-push-type": "alert",      // required for iOS 13+
+          "apns-priority": "10",
+          "apns-push-type": "alert",
         },
         payload: {
           aps: {
-            alert: {
-              title,
-              body: message,
-            },
+            alert: { title, body: message },
             sound: "default",
             badge: 1,
-            "mutable-content": 1,       // allows notification service extensions
-            "content-available": 1,     // wake app in background for data processing
+            "mutable-content": 1,
+            "content-available": 1,
           },
         },
       },
@@ -75,16 +66,13 @@ async function sendToAllUsers(title, message, redirect = "") {
       success += response.successCount;
       failure += response.failureCount;
 
-      // Clean up invalid tokens using the pre-built reverse map
-      // No need to re-read the entire fcmTokens node — O(1) lookup per failed token
+      // Clean up invalid tokens
       const removeOps = [];
       response.responses.forEach((r, idx) => {
         if (!r.success) {
           const code = r.error?.code;
           const failedToken = batch[idx].token;
-          console.log(`Token failed: ${failedToken.slice(0, 20)}... — ${code}`);
 
-          // These codes mean the token is permanently invalid
           if (
             code === 'messaging/invalid-registration-token' ||
             code === 'messaging/registration-token-not-registered' ||
@@ -96,20 +84,14 @@ async function sendToAllUsers(title, message, redirect = "") {
                 db.ref(`fcmTokens/${userId}`).remove(),
                 db.ref(`users/${userId}/fcmToken`).remove()
               );
-              console.log(`Queued stale token removal for user: ${userId}`);
             }
           }
         }
       });
 
-      // Execute all removals in parallel
       if (removeOps.length > 0) {
-        try {
-          await Promise.all(removeOps);
-          console.log(`Removed ${removeOps.length / 2} stale token(s)`);
-        } catch (cleanupErr) {
-          console.error("Stale token cleanup failed:", cleanupErr.message);
-        }
+        await Promise.allSettled(removeOps);
+        console.log(`Removed ${removeOps.length / 2} stale token(s)`);
       }
     }
 
