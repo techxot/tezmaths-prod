@@ -33,7 +33,7 @@ async function createSubscription({ userId, duration, razorpayPlanId }) {
     notes: { userId, duration: normalizedDuration },
   });
 
-  await db.ref(`users/${userId}`).update({
+  await db.ref(`users/${userId}/profile`).update({
     subscriptionStatus: "created",
     autoRenew: true,
     razorpaySubscriptionId: subscription.id,
@@ -56,7 +56,7 @@ async function createSubscription({ userId, duration, razorpayPlanId }) {
 // ─── Cancel Subscription ──────────────────────────────────────────────────────
 
 async function cancelSubscription(userId) {
-  const userSnap = await db.ref(`users/${userId}`).once("value");
+  const userSnap = await db.ref(`users/${userId}/profile`).once("value");
   const user = userSnap.val() || {};
 
   if (!user.razorpaySubscriptionId) {
@@ -71,7 +71,7 @@ async function cancelSubscription(userId) {
     ? cancelledSub.current_end * 1000
     : (user.subscriptionEndDate || Date.now());
 
-  await db.ref(`users/${userId}`).update({
+  await db.ref(`users/${userId}/profile`).update({
     autoRenew: false,
     subscriptionStatus: "cancelled",
     cancelledAt: Date.now(),
@@ -131,7 +131,7 @@ async function handleWebhookEvent(event, payload) {
     return;
   }
 
-  const userRef = db.ref(`users/${userId}`);
+  const userRef = db.ref(`users/${userId}/profile`);
 
   if (event === "subscription.authenticated" || event === "subscription.activated") {
     await userRef.update({

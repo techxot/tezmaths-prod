@@ -67,18 +67,23 @@ async function getUsers({ page = 1, limit = 50, search = "" } = {}) {
 
   // Refresh cache if expired or missing
   if (!cachedUsers || now - cacheTimestamp > CACHE_TTL_MS) {
+    const startTime = Date.now();
+    console.log(`[admin.service] 🔄 Users cache EXPIRED or EMPTY — downloading full /users node...`);
     const snapshot = await db.ref("users").once("value");
+    const downloadTime = Date.now() - startTime;
     if (!snapshot.exists()) {
       cachedUsers = [];
     } else {
       const data = snapshot.val();
+      const rawSize = JSON.stringify(data).length;
       cachedUsers = Object.entries(data)
         .map(([id, u]) => stripUserToAdminFields(id, u))
         .filter((u) => u.email !== "tezmaths@admin.com")
         .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      console.log(`[admin.service] ⚠️ BANDWIDTH: Downloaded ${(rawSize / (1024 * 1024)).toFixed(2)} MB from /users in ${downloadTime}ms`);
     }
     cacheTimestamp = now;
-    console.log(`[admin.service] Users cache refreshed: ${cachedUsers.length} users, ~${Math.round(JSON.stringify(cachedUsers).length / 1024)} KB in memory`);
+    console.log(`[admin.service] ✅ Users cache refreshed: ${cachedUsers.length} users, ~${Math.round(JSON.stringify(cachedUsers).length / 1024)} KB in memory`);
   }
 
   // Apply search filter
@@ -149,19 +154,23 @@ async function getDashboardStats() {
       } else {
         // Counter doesn't exist — initialize it using numChildren (downloads keys only, not full values)
         // Admin SDK numChildren still needs the snapshot, but this only happens ONCE ever
+        console.log(`[admin.service] ⚠️ BANDWIDTH: _counts node missing — downloading full /quizzes + /videos to count keys (ONE-TIME)`);
         const [quizzesSnap, videosSnap] = await Promise.all([
           db.ref("quizzes").once("value"),
           db.ref("videos").once("value"),
         ]);
         cachedQuizCount = quizzesSnap.exists() ? quizzesSnap.numChildren() : 0;
         cachedVideoCount = videosSnap.exists() ? videosSnap.numChildren() : 0;
+        const quizSize = quizzesSnap.exists() ? JSON.stringify(quizzesSnap.val()).length : 0;
+        const videoSize = videosSnap.exists() ? JSON.stringify(videosSnap.val()).length : 0;
+        console.log(`[admin.service] ⚠️ BANDWIDTH: /quizzes=${(quizSize / (1024 * 1024)).toFixed(2)} MB, /videos=${(videoSize / (1024 * 1024)).toFixed(2)} MB`);
 
         // Persist counter so this heavy read never happens again
         await db.ref("_counts").set({
           quizzes: cachedQuizCount,
           videos: cachedVideoCount,
         });
-        console.log(`[admin.service] _counts initialized: quizzes=${cachedQuizCount}, videos=${cachedVideoCount}`);
+        console.log(`[admin.service] ✅ _counts initialized: quizzes=${cachedQuizCount}, videos=${cachedVideoCount} — future reads will be <100 bytes`);
       }
     } catch (error) {
       console.warn("[admin.service] Content count read failed:", error.message);
