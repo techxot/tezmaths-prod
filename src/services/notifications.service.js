@@ -2,13 +2,18 @@ const { admin, db } = require("../config/firebase");
 
 async function sendToAllUsers(title, message, redirect = "") {
   try {
-    // Read from lightweight /fcmTokens/{userId} index instead of full /users
+    // Read from lightweight /fcmTokens/{userId} index instead of full /users (saves ~17MB)
+    const startTime = Date.now();
     const tokensSnap = await db.ref("fcmTokens").once("value");
+    const downloadTime = Date.now() - startTime;
     
     if (!tokensSnap.exists()) {
-      console.log("No FCM tokens found in /fcmTokens index");
+      console.log("[notifications] No FCM tokens found in /fcmTokens index");
       return { sent: 0, failure: 0 };
     }
+
+    const rawSize = JSON.stringify(tokensSnap.val()).length;
+    console.log(`[notifications] ⚠️ BANDWIDTH: Downloaded ${(rawSize / 1024).toFixed(1)} KB from /fcmTokens in ${downloadTime}ms`);
 
     const tokenToUser = {};
     const rawTokens = tokensSnap.val();
