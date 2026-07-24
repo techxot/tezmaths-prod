@@ -21,6 +21,7 @@ const migrationRouter = require("./routes/migration.routes");
 const leaderboardRouter = require("./routes/leaderboard.routes");
 const adminRouter = require("./routes/admin.routes");
 const quizzesRouter = require("./routes/quizzes.routes");
+const contentRouter = require("./routes/content.routes");
 
 app.use("/api/payments", paymentsRouter);
 app.use("/api/notifications", notificationsRouter);
@@ -28,6 +29,7 @@ app.use("/api/migrate", migrationRouter);
 app.use("/api/leaderboard", leaderboardRouter);
 app.use("/api/admin", adminRouter);
 app.use("/api/quizzes", quizzesRouter);
+app.use("/api/content", contentRouter);
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get("/health", (_req, res) => res.json({ status: "ok", timestamp: new Date().toISOString() }));
