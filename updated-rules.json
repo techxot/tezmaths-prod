@@ -1,5 +1,9 @@
 {
   "rules": {
+    "_cache": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": "auth != null && auth.token.admin === true"
+    },
     "appConfig": {
       ".read": true,
       ".write": "auth != null && auth.token.admin === true"
@@ -234,13 +238,13 @@
       ".read": "auth != null",
       ".indexOn": ["highScore"],
       "$userId": {
-        ".write": "auth != null && auth.uid === $userId"
+        ".write": "auth != null && auth.uid === $userId && auth.token.firebase.sign_in_provider !== 'anonymous'"
       }
     },
     "fcmTokens": {
-      ".read": "auth != null",
+      ".read": "auth != null && auth.token.firebase.sign_in_provider !== 'anonymous'",
       "$userId": {
-        ".write": "auth != null && auth.uid === $userId"
+        ".write": "auth != null && auth.uid === $userId && auth.token.firebase.sign_in_provider !== 'anonymous'"
       }
     },
     "quizzes": {
@@ -263,7 +267,7 @@
       ".indexOn": ["highScore", "xp", "totalPoints", "createdAt"],
       "$uid": {
         ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
-        ".write": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+        ".write": "auth != null && auth.token.firebase.sign_in_provider !== 'anonymous' && (auth.uid === $uid || auth.token.admin === true)",
         "contacts": {
           ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
           ".write": "auth != null && auth.uid === $uid"
