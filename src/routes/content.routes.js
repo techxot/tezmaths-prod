@@ -96,7 +96,7 @@ router.post("/invalidate/:cacheKey", verifyAdmin, async (req, res) => {
       return res.status(400).json({ error: { message: `Invalid cacheKey. Must be one of: ${validKeys.join(", ")}` } });
     }
 
-    const success = invalidate(cacheKey, topicId);
+    const success = await invalidate(cacheKey, topicId);
     if (success) {
       const detail = cacheKey === "practiceQuestions" && topicId ? `${cacheKey}/${topicId}` : cacheKey;
       return res.json({ success: true, message: `Cache invalidated: ${detail}` });
@@ -112,7 +112,7 @@ router.post("/invalidate/:cacheKey", verifyAdmin, async (req, res) => {
 // Admin only — invalidates all content caches
 router.post("/invalidate-all", verifyAdmin, async (req, res) => {
   try {
-    invalidateAll();
+    await invalidateAll();
     return res.json({ success: true, message: "All content caches invalidated" });
   } catch (error) {
     console.error("[content] POST /invalidate-all error:", error.message);

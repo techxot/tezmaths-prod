@@ -3,15 +3,19 @@ const { db } = require("../config/firebase");
 /**
  * Content Cache Service — Server-side proxy for static content data.
  *
- * Caches Firebase data indefinitely (no TTL). Only refreshes on:
- * 1. First request (cache empty)
- * 2. Admin explicitly invalidates via API
+ * Railway has an ephemeral filesystem so disk cache is useless across deploys.
+ * We use Firebase _cache/content/* to persist data across deploys.
  *
- * This eliminates direct Firebase reads from the app for:
- * practiceTopics, practiceQuestions, quizLevels, videos, studyWall, appConfig
+ * Read flow per cache key:
+ *   1. In-memory        — 0 Firebase reads (process lifetime)
+ *   2. _cache/content/X — reads persisted cache (~KB, survives deploys)
+ *   3. Real source node — reads actual data (first ever or after invalidation)
+ *      └─ writes result back to _cache/content/X
+ *
+ * Firebase reads per key: 1 ever (until admin invalidates)
  */
 
-// In-memory caches
+// ─── In-memory caches ─────────────────────────────────────────────────────────
 const practiceTopicsCache = { data: null };
 const practiceQuestionsCache = new Map(); // keyed by topicId
 const quizLevelsCache = { data: null };
@@ -19,100 +23,216 @@ const videosCache = { data: null };
 const studyWallCache = { data: null };
 const appConfigCache = { data: null };
 
+// ─── Firebase persistent cache helpers ───────────────────────────────────────
+
+async function loadFromFbCache(key) {
+  try {
+    const snap = await db.ref(`_cache/content/${key}`).once("value");
+    if (!snap.exists()) return null;
+    const entry = snap.val();
+    if (!entry || entry.data === undefined || entry.data === null) return null;
+    return entry.data;
+  } catch {
+    return null;
+  }
+}
+
+async function saveToFbCache(key, data) {
+  try {
+    await db.ref(`_cache/content/${key}`).set({ data, savedAt: Date.now() });
+  } catch (err) {
+    console.warn(`[content.service] Firebase cache write failed for ${key}:`, err.message);
+  }
+}
+
+async function deleteFromFbCache(key) {
+  try {
+    await db.ref(`_cache/content/${key}`).remove();
+  } catch (_) {}
+}
+
+// ─── Warmup on startup ────────────────────────────────────────────────────────
+// Load all cached content into memory on first module require so the first
+// user request per endpoint is served from memory, not Firebase.
+let warmupDone = false;
+let warmupPromise = null;
+
+function warmup() {
+  if (warmupDone || warmupPromise) return warmupPromise || Promise.resolve();
+  warmupPromise = (async () => {
+    try {
+      const snap = await db.ref("_cache/content").once("value");
+      if (!snap.exists()) return;
+      const cached = snap.val();
+
+      if (cached.practiceTopics?.data !== undefined) {
+        practiceTopicsCache.data = cached.practiceTopics.data;
+        console.log(`[content.service] ✅ practiceTopics warmed from _cache`);
+      }
+      if (cached.quizLevels?.data !== undefined) {
+        quizLevelsCache.data = cached.quizLevels.data;
+        console.log(`[content.service] ✅ quizLevels warmed from _cache`);
+      }
+      if (cached.videos?.data !== undefined) {
+        videosCache.data = cached.videos.data;
+        console.log(`[content.service] ✅ videos warmed from _cache`);
+      }
+      if (cached.studyWall?.data !== undefined) {
+        studyWallCache.data = cached.studyWall.data;
+        console.log(`[content.service] ✅ studyWall warmed from _cache`);
+      }
+      if (cached.appConfig?.data !== undefined) {
+        appConfigCache.data = cached.appConfig.data;
+        console.log(`[content.service] ✅ appConfig warmed from _cache`);
+      }
+      // practiceQuestions are per-topicId — load all cached topics
+      if (cached.practiceQuestions) {
+        for (const [topicId, entry] of Object.entries(cached.practiceQuestions)) {
+          if (entry && entry.data !== undefined) {
+            practiceQuestionsCache.set(topicId, entry.data);
+          }
+        }
+        console.log(`[content.service] ✅ practiceQuestions warmed: ${practiceQuestionsCache.size} topics`);
+      }
+    } catch (err) {
+      console.warn("[content.service] Warmup failed:", err.message);
+    } finally {
+      warmupDone = true;
+    }
+  })();
+  return warmupPromise;
+}
+
+// Kick off warmup immediately on module load
+warmup();
+
 // ─── Practice Topics ──────────────────────────────────────────────────────────
 
 async function getPracticeTopics() {
-  if (practiceTopicsCache.data !== null) {
-    return practiceTopicsCache.data;
+  await warmup();
+  if (practiceTopicsCache.data !== null) return practiceTopicsCache.data;
+
+  // L2: Firebase cache node
+  const fbData = await loadFromFbCache("practiceTopics");
+  if (fbData !== null) {
+    practiceTopicsCache.data = fbData;
+    console.log(`[content.service] ✅ practiceTopics loaded from _cache`);
+    return fbData;
   }
 
+  // L3: Real source
   const snapshot = await db.ref("practiceTopics").once("value");
   const data = snapshot.exists() ? snapshot.val() : [];
-
   practiceTopicsCache.data = data;
   const count = Array.isArray(data) ? data.length : Object.keys(data).length;
   console.log(`[content.service] Practice topics cache loaded: ${count} topics`);
-
+  await saveToFbCache("practiceTopics", data);
   return data;
 }
 
 // ─── Practice Questions (per topicId) ─────────────────────────────────────────
 
 async function getPracticeQuestions(topicId) {
-  const cached = practiceQuestionsCache.get(topicId);
-  if (cached !== undefined) {
-    return cached;
+  await warmup();
+  if (practiceQuestionsCache.has(topicId)) return practiceQuestionsCache.get(topicId);
+
+  // L2: Firebase cache node
+  const fbData = await loadFromFbCache(`practiceQuestions/${topicId}`);
+  if (fbData !== null) {
+    practiceQuestionsCache.set(topicId, fbData);
+    console.log(`[content.service] ✅ practiceQuestions/${topicId} loaded from _cache`);
+    return fbData;
   }
 
+  // L3: Real source
   const snapshot = await db.ref(`practiceQuestions/${topicId}`).once("value");
   const data = snapshot.exists() ? snapshot.val() : [];
-
   practiceQuestionsCache.set(topicId, data);
   const count = Array.isArray(data) ? data.length : Object.keys(data).length;
   console.log(`[content.service] Practice questions cache loaded for topic ${topicId}: ${count} questions`);
-
+  await saveToFbCache(`practiceQuestions/${topicId}`, data);
   return data;
 }
 
 // ─── Quiz Levels ──────────────────────────────────────────────────────────────
 
 async function getQuizLevels() {
-  if (quizLevelsCache.data !== null) {
-    return quizLevelsCache.data;
+  await warmup();
+  if (quizLevelsCache.data !== null) return quizLevelsCache.data;
+
+  const fbData = await loadFromFbCache("quizLevels");
+  if (fbData !== null) {
+    quizLevelsCache.data = fbData;
+    console.log(`[content.service] ✅ quizLevels loaded from _cache`);
+    return fbData;
   }
 
   const snapshot = await db.ref("quizLevels").once("value");
   const data = snapshot.exists() ? snapshot.val() : [];
-
   quizLevelsCache.data = data;
   const count = Array.isArray(data) ? data.length : Object.keys(data).length;
   console.log(`[content.service] Quiz levels cache loaded: ${count} levels`);
-
+  await saveToFbCache("quizLevels", data);
   return data;
 }
 
 // ─── Videos ───────────────────────────────────────────────────────────────────
 
 async function getVideos() {
-  if (videosCache.data !== null) {
-    return videosCache.data;
+  await warmup();
+  if (videosCache.data !== null) return videosCache.data;
+
+  const fbData = await loadFromFbCache("videos");
+  if (fbData !== null) {
+    videosCache.data = fbData;
+    console.log(`[content.service] ✅ videos loaded from _cache`);
+    return fbData;
   }
 
   const snapshot = await db.ref("videos").once("value");
   const data = snapshot.exists() ? snapshot.val() : [];
-
   videosCache.data = data;
   const count = Array.isArray(data) ? data.length : Object.keys(data).length;
   console.log(`[content.service] Videos cache loaded: ${count} videos`);
-
+  await saveToFbCache("videos", data);
   return data;
 }
 
 // ─── Study Wall ───────────────────────────────────────────────────────────────
 
 async function getStudyWall() {
-  if (studyWallCache.data !== null) {
-    return studyWallCache.data;
+  await warmup();
+  if (studyWallCache.data !== null) return studyWallCache.data;
+
+  const fbData = await loadFromFbCache("studyWall");
+  if (fbData !== null) {
+    studyWallCache.data = fbData;
+    console.log(`[content.service] ✅ studyWall loaded from _cache`);
+    return fbData;
   }
 
   const snapshot = await db.ref("studyWall").once("value");
   const data = snapshot.exists() ? snapshot.val() : [];
-
   studyWallCache.data = data;
   const count = Array.isArray(data) ? data.length : Object.keys(data).length;
   console.log(`[content.service] Study wall cache loaded: ${count} items`);
-
+  await saveToFbCache("studyWall", data);
   return data;
 }
 
-// ─── App Config (combined settings) ───────────────────────────────────────────
+// ─── App Config ───────────────────────────────────────────────────────────────
 
 async function getAppConfig() {
-  if (appConfigCache.data !== null) {
-    return appConfigCache.data;
+  await warmup();
+  if (appConfigCache.data !== null) return appConfigCache.data;
+
+  const fbData = await loadFromFbCache("appConfig");
+  if (fbData !== null) {
+    appConfigCache.data = fbData;
+    console.log(`[content.service] ✅ appConfig loaded from _cache`);
+    return fbData;
   }
 
-  // Fetch all config nodes in parallel
   const [adSettingsSnap, subscriptionPricingSnap, practiceTimerSnap, practiceLevelSnap] = await Promise.all([
     db.ref("adSettings").once("value"),
     db.ref("subscriptionPricing").once("value"),
@@ -129,45 +249,48 @@ async function getAppConfig() {
 
   appConfigCache.data = data;
   console.log(`[content.service] App config cache loaded: adSettings, subscriptionPricing, practiceTimerDurations, practiceLevelSettings`);
-
+  await saveToFbCache("appConfig", data);
   return data;
 }
 
 // ─── Cache Invalidation ───────────────────────────────────────────────────────
 
-/**
- * Invalidate a specific cache by key.
- * For practiceQuestions, pass topicId to clear a specific topic, or omit to clear all.
- */
-function invalidate(cacheKey, topicId) {
+async function invalidate(cacheKey, topicId) {
   switch (cacheKey) {
     case "practiceTopics":
       practiceTopicsCache.data = null;
+      await deleteFromFbCache("practiceTopics");
       console.log(`[content.service] Cache invalidated: practiceTopics`);
       break;
     case "practiceQuestions":
       if (topicId) {
         practiceQuestionsCache.delete(topicId);
+        await deleteFromFbCache(`practiceQuestions/${topicId}`);
         console.log(`[content.service] Cache invalidated: practiceQuestions/${topicId}`);
       } else {
         practiceQuestionsCache.clear();
+        await deleteFromFbCache("practiceQuestions");
         console.log(`[content.service] Cache invalidated: all practiceQuestions`);
       }
       break;
     case "quizLevels":
       quizLevelsCache.data = null;
+      await deleteFromFbCache("quizLevels");
       console.log(`[content.service] Cache invalidated: quizLevels`);
       break;
     case "videos":
       videosCache.data = null;
+      await deleteFromFbCache("videos");
       console.log(`[content.service] Cache invalidated: videos`);
       break;
     case "studyWall":
       studyWallCache.data = null;
+      await deleteFromFbCache("studyWall");
       console.log(`[content.service] Cache invalidated: studyWall`);
       break;
     case "appConfig":
       appConfigCache.data = null;
+      await deleteFromFbCache("appConfig");
       console.log(`[content.service] Cache invalidated: appConfig`);
       break;
     default:
@@ -177,16 +300,14 @@ function invalidate(cacheKey, topicId) {
   return true;
 }
 
-/**
- * Invalidate all caches.
- */
-function invalidateAll() {
+async function invalidateAll() {
   practiceTopicsCache.data = null;
   practiceQuestionsCache.clear();
   quizLevelsCache.data = null;
   videosCache.data = null;
   studyWallCache.data = null;
   appConfigCache.data = null;
+  try { await db.ref("_cache/content").remove(); } catch (_) {}
   console.log(`[content.service] All content caches invalidated`);
 }
 

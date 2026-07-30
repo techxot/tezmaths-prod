@@ -89,7 +89,10 @@ async function getQuizzesByLevel(level) {
 
   const now = Date.now();
   const cached = quizCache.get(level);
-  if (cached && now - cached.timestamp < CACHE_TTL_MS) return cached.data;
+  if (cached && now - cached.timestamp < CACHE_TTL_MS) {
+    console.log(`[quiz.service] ⚡ Level ${level} → MEMORY CACHE`);
+    return cached.data;
+  }
 
   // L2: Firebase cache node — survives Railway deploys
   const fbCached = await loadFromFirebaseCache(level);
