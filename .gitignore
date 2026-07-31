@@ -32,3 +32,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Server-side disk cache (quiz data, user list — rebuilt from Firebase on cold start)
+.cache/
