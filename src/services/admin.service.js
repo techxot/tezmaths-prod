@@ -231,12 +231,16 @@ async function getDashboardStats() {
         cachedQuizCount = counts.quizzes || 0;
         cachedVideoCount = counts.videos || 0;
       } else {
-        const [quizzesSnap, videosSnap] = await Promise.all([
-          db.ref("quizzes").once("value"),
-          db.ref("videos").once("value"),
+        // Use shallow=true to get only keys — avoids downloading full 9MB /quizzes node
+        const databaseURL = process.env.FIREBASE_DATABASE_URL;
+        const [quizzesRes, videosRes] = await Promise.all([
+          fetch(`${databaseURL}/quizzes.json?shallow=true`),
+          fetch(`${databaseURL}/videos.json?shallow=true`),
         ]);
-        cachedQuizCount = quizzesSnap.exists() ? quizzesSnap.numChildren() : 0;
-        cachedVideoCount = videosSnap.exists() ? videosSnap.numChildren() : 0;
+        const quizzesKeys = await quizzesRes.json();
+        const videosKeys = await videosRes.json();
+        cachedQuizCount = quizzesKeys ? Object.keys(quizzesKeys).length : 0;
+        cachedVideoCount = videosKeys ? Object.keys(videosKeys).length : 0;
         await db.ref("_counts").set({ quizzes: cachedQuizCount, videos: cachedVideoCount });
       }
     } catch (err) {
