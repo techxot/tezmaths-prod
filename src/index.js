@@ -1,8 +1,11 @@
+const http = require("http");
 const express = require("express");
 const cors = require("cors");
 const cron = require("node-cron");
 const { config } = require("dotenv");
 config();
+
+const { createSocketServer } = require("./socket");
 
 const app = express();
 
@@ -57,6 +60,9 @@ cron.schedule("0 */6 * * *", async () => {
 }, { timezone: "Asia/Kolkata" });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+const server = http.createServer(app);
+const io = createSocketServer(server);
 
-module.exports = app;
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+module.exports = { app, server, io };
