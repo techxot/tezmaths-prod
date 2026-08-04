@@ -153,11 +153,12 @@ class MatchmakingQueue {
   }
 
   /**
-   * Handles timeout for a queued player — emits match_timeout.
+   * Handles timeout for a queued player — creates a bot opponent and pairs them.
+   * Replaces the previous match_timeout emission with bot creation logic.
    * @param {string} socketId
    * @private
    */
-  _handleTimeout(socketId) {
+  async _handleTimeout(socketId) {
     const index = this.queue.findIndex((entry) => entry.socketId === socketId);
     if (index === -1) {
       // Player already removed (matched or cancelled)
@@ -169,8 +170,49 @@ class MatchmakingQueue {
     this.queue.splice(index, 1);
     this.timeouts.delete(socketId);
 
-    // Emit match_timeout to the player (Requirement 9.5)
-    player.socket.emit("match_timeout", {});
+    // Create bot and pair with waiting player
+    const { BotSocket } = require("./botSocket");
+    const { BotOpponent } = require("./botOpponent");
+
+    const botIdentity = BotOpponent.generateIdentity();
+    const botSocket = new BotSocket(this.io, botIdentity.username, botIdentity.avatar, botIdentity.userId);
+
+    const roomId = this._generateRoomId();
+
+    // Create Firebase room (same format as real matches)
+    await this._createFirebaseRoom(roomId, player, {
+      uid: botIdentity.userId,
+      username: botIdentity.username,
+      avatar: botIdentity.avatar,
+    });
+
+    // Join both to room
+    player.socket.join(roomId);
+    botSocket.join(roomId);
+
+    // Emit match_found to human player
+    player.socket.emit("match_found", {
+      roomId,
+      opponent: {
+        username: botIdentity.username,
+        avatar: botIdentity.avatar,
+        uid: botIdentity.userId,
+      },
+    });
+
+    // Emit match_found to bot (triggers ready_for_battle)
+    botSocket.emit("match_found", { roomId, opponent: { username: player.username, avatar: player.avatar, uid: player.uid } });
+
+    // Create BotOpponent (sets up battle_start / next_question listeners)
+    const botOpponent = new BotOpponent(botSocket, this.battleSessionManager, roomId);
+
+    // Bot auto-readies via the ready_for_battle handshake
+    const { getReadyPlayers } = require("./handlers");
+    const readyPlayers = getReadyPlayers();
+    if (!readyPlayers.has(roomId)) {
+      readyPlayers.set(roomId, new Map());
+    }
+    readyPlayers.get(roomId).set(botSocket.userId, botSocket);
   }
 
   /**

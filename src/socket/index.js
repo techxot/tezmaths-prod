@@ -31,8 +31,8 @@ function createSocketServer(httpServer) {
   const battleSessionManager = new BattleSessionManager(io);
   const matchmakingQueue = new MatchmakingQueue(io, battleSessionManager);
 
-  // Start memory monitoring (Requirement 13.4, 13.5)
-  battleSessionManager.startMonitoring();
+  // Memory monitoring disabled — will be enabled when socket-based battles are active
+  // battleSessionManager.startMonitoring();
 
   // Register authentication middleware
   io.use(socketAuthMiddleware);
