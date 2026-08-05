@@ -4,6 +4,8 @@
  * id, userId, userData, handshake, emit(), on(), join(), removeAllListeners().
  *
  * The BattleSessionManager treats this identically to a real socket connection.
+ * The bot registers itself in io.sockets.sockets so that room broadcasts
+ * (io.to(roomId).emit()) reach it through the normal Socket.IO adapter flow.
  */
 class BotSocket {
   /**
@@ -19,10 +21,14 @@ class BotSocket {
     this.userData = { username, avatar };
     this.handshake = { auth: { username, avatar } };
     this._listeners = new Map();
+
+    // Register this bot in the sockets map so io.to(roomId).emit() broadcasts reach it
+    this.io.sockets.sockets.set(this.id, this);
   }
 
   /**
    * Delivers an event to all registered listeners for that event name.
+   * Also handles the packet format that Socket.IO adapter uses internally.
    * @param {string} event - Event name
    * @param {*} data - Event payload
    */
@@ -32,6 +38,31 @@ class BotSocket {
       handler(data);
     }
   }
+
+  /**
+   * Handles Socket.IO internal packet delivery (used by room broadcasts).
+   * When io.to(roomId).emit(event, data) is called, the adapter calls
+   * socket.packet() on each socket in the room.
+   * @param {object} packet - The Socket.IO packet object
+   */
+  packet(packet) {
+    // Socket.IO packet format: { type: 2, data: [eventName, ...args], nsp: '/' }
+    if (packet && packet.data && Array.isArray(packet.data)) {
+      const [event, ...args] = packet.data;
+      this.emit(event, args[0]);
+    }
+  }
+
+  /**
+   * No-op for Socket.IO compatibility — prevents errors when the adapter
+   * tries to notify about new broadcasts via the socket's client.
+   */
+  notifyOutgoingListeners() {}
+  
+  /**
+   * No-op dispatch method for Socket.IO compatibility.
+   */
+  dispatch() {}
 
   /**
    * Registers an event listener.
@@ -59,6 +90,18 @@ class BotSocket {
    */
   removeAllListeners() {
     this._listeners.clear();
+  }
+
+  /**
+   * Unregisters this bot from the sockets map and leaves the room.
+   * Called during cleanup to prevent memory leaks.
+   * @param {string} roomId - Room to leave
+   */
+  destroy(roomId) {
+    this.io.sockets.sockets.delete(this.id);
+    if (roomId) {
+      this.io.of("/").adapter.del(this.id, roomId);
+    }
   }
 
   /**

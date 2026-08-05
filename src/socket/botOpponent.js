@@ -66,9 +66,18 @@ class BotOpponent {
    * @private
    */
   _setupListeners() {
-    this.socket.on("battle_start", (data) => this._scheduleAnswer(data));
-    this.socket.on("next_question", (data) => this._scheduleAnswer(data));
-    this.socket.on("battle_end", () => this._cleanup());
+    this.socket.on("battle_start", (data) => {
+      console.log(`[BotOpponent] Received battle_start for room ${this.roomId}, questionIndex: ${data.questionIndex}`);
+      this._scheduleAnswer(data);
+    });
+    this.socket.on("next_question", (data) => {
+      console.log(`[BotOpponent] Received next_question for room ${this.roomId}, questionIndex: ${data.questionIndex}`);
+      this._scheduleAnswer(data);
+    });
+    this.socket.on("battle_end", () => {
+      console.log(`[BotOpponent] Received battle_end for room ${this.roomId}`);
+      this._cleanup();
+    });
   }
 
   /**
@@ -80,8 +89,10 @@ class BotOpponent {
   _scheduleAnswer(data) {
     this._cancelPendingAnswer();
     const delay = 1000 + Math.floor(Math.random() * 2001); // 1000-3000ms
+    console.log(`[BotOpponent] Scheduling answer for question ${data.questionIndex} in ${delay}ms`);
     this.answerTimer = setTimeout(() => {
       const answer = this._generateAnswer(data.questionIndex);
+      console.log(`[BotOpponent] Submitting answer "${answer}" for question ${data.questionIndex} in room ${this.roomId}`);
       this.bsm.submitAnswer(this.roomId, this.userId, answer, data.questionIndex);
     }, delay);
   }
@@ -135,7 +146,8 @@ class BotOpponent {
   _cleanup() {
     this._cancelPendingAnswer();
     this.socket.removeAllListeners();
-    this.socket.io.of("/").adapter.del(this.socket.id, this.roomId);
+    // Unregister bot from sockets map and leave the room
+    this.socket.destroy(this.roomId);
   }
 }
 
