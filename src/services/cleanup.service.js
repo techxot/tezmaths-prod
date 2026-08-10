@@ -1,4 +1,5 @@
 const { db } = require("../config/firebase");
+const { getFirestore } = require("firebase-admin/firestore");
 
 /**
  * Cleanup service that removes stale data from Firebase to prevent
@@ -155,12 +156,52 @@ async function cleanupOrphanedRoomQuestions() {
 }
 
 /**
+ * Removes Firestore battle rooms older than 6 hours.
+ * Human battles now live in Firestore — this cleans up finished/abandoned rooms
+ * along with their associated roomQuestions and matchmaking entries.
+ * 
+ * Note: Firestore batch limit is 500 operations, so we limit to 100 rooms
+ * (each room = 3 deletes: room + questions + matchmaking = 300 ops max).
+ */
+async function cleanupOldFirestoreRooms() {
+    const firestore = getFirestore();
+    const cutoff = new Date(Date.now() - SIX_HOURS_MS);
+    let removedCount = 0;
+
+    try {
+        // Query rooms with createdAt older than 6 hours
+        const snapshot = await firestore.collection("rooms")
+            .where("createdAt", "<", cutoff)
+            .limit(100)
+            .get();
+
+        if (snapshot.empty) return { removedRooms: 0 };
+
+        const batch = firestore.batch();
+        snapshot.docs.forEach(doc => {
+            batch.delete(doc.ref);
+            batch.delete(firestore.doc(`roomQuestions/${doc.id}`));
+            batch.delete(firestore.doc(`matchmaking/${doc.id}`));
+            removedCount++;
+        });
+
+        await batch.commit();
+        console.log(`[Cleanup] Removed ${removedCount} old Firestore rooms`);
+        return { removedRooms: removedCount };
+    } catch (error) {
+        console.error("[Cleanup] cleanupOldFirestoreRooms error:", error.message);
+        return { removedRooms: 0, error: error.message };
+    }
+}
+
+/**
  * Main cleanup function — runs all cleanup tasks.
  */
 async function runCleanup() {
     console.log("[Cleanup] Starting scheduled cleanup...");
     const results = await Promise.allSettled([
         cleanupOldRooms(),
+        cleanupOldFirestoreRooms(),
         cleanupOldPaymentLogs(),
         cleanupOrphanedRoomQuestions(),
     ]);
@@ -174,4 +215,4 @@ async function runCleanup() {
     console.log("[Cleanup] Completed.");
 }
 
-module.exports = { runCleanup, cleanupOldRooms, cleanupOldPaymentLogs, cleanupOrphanedRoomQuestions };
+module.exports = { runCleanup, cleanupOldRooms, cleanupOldFirestoreRooms, cleanupOldPaymentLogs, cleanupOrphanedRoomQuestions };
