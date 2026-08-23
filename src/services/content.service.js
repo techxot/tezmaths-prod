@@ -126,27 +126,23 @@ async function getStudyTopics() {
 
 // ─── Study Content (per topicId) ──────────────────────────────────────────────
 
-const studyContentsCache = { data: null };
+const studyContentsCache = new Map(); // keyed by topicId
 
 async function getStudyContent(topicId) {
-  // Load all studyContents into cache if not already
-  if (studyContentsCache.data === null) {
-    const snapshot = await db.ref("studyContents").once("value");
-    studyContentsCache.data = snapshot.exists() ? snapshot.val() : {};
-    const count = Object.keys(studyContentsCache.data).length;
-    console.log(`[content.service] Study contents cache loaded: ${count} items`);
+  const cached = studyContentsCache.get(topicId);
+  if (cached !== undefined) {
+    return cached;
   }
 
-  // Filter by topicId
-  const allContents = studyContentsCache.data;
-  const filtered = {};
-  for (const [id, content] of Object.entries(allContents)) {
-    if (content && content.topicId === topicId) {
-      filtered[id] = content;
-    }
-  }
+  // Data is nested: studyContents/{topicId}/{contentId}
+  const snapshot = await db.ref(`studyContents/${topicId}`).once("value");
+  const data = snapshot.exists() ? snapshot.val() : null;
 
-  return Object.keys(filtered).length > 0 ? filtered : null;
+  studyContentsCache.set(topicId, data);
+  const count = data ? Object.keys(data).length : 0;
+  console.log(`[content.service] Study content cache loaded for topic ${topicId}: ${count} items`);
+
+  return data;
 }
 
 // ─── App Config (combined settings) ───────────────────────────────────────────
@@ -215,7 +211,7 @@ function invalidate(cacheKey, topicId) {
       console.log(`[content.service] Cache invalidated: studyTopics`);
       break;
     case "studyContents":
-      studyContentsCache.data = null;
+      studyContentsCache.clear();
       console.log(`[content.service] Cache invalidated: studyContents`);
       break;
     case "appConfig":
@@ -239,7 +235,7 @@ function invalidateAll() {
   videosCache.data = null;
   studyWallCache.data = null;
   studyTopicsCache.data = null;
-  studyContentsCache.data = null;
+  studyContentsCache.clear();
   appConfigCache.data = null;
   console.log(`[content.service] All content caches invalidated`);
 }
