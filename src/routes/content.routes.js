@@ -8,6 +8,7 @@ const {
   getVideos,
   getStudyWall,
   getStudyTopics,
+  getStudyContent,
   getAppConfig,
   invalidate,
   invalidateAll,
@@ -84,6 +85,22 @@ router.get("/study-topics", verifyFirebaseToken, async (req, res) => {
   }
 });
 
+// ─── GET /api/content/study-content/:topicId ──────────────────────────────────
+router.get("/study-content/:topicId", verifyFirebaseToken, async (req, res) => {
+  try {
+    const { topicId } = req.params;
+    if (!topicId) {
+      return res.status(400).json({ error: { message: "topicId is required" } });
+    }
+
+    const data = await getStudyContent(topicId);
+    return res.json({ studyContent: data });
+  } catch (error) {
+    console.error("[content] GET /study-content/:topicId error:", error.message);
+    return res.status(500).json({ error: { message: "Failed to fetch study content" } });
+  }
+});
+
 // ─── GET /api/content/app-config ──────────────────────────────────────────────
 router.get("/app-config", verifyFirebaseToken, async (req, res) => {
   try {
@@ -103,7 +120,7 @@ router.post("/invalidate/:cacheKey", verifyAdmin, async (req, res) => {
     const { cacheKey } = req.params;
     const { topicId } = req.query;
 
-    const validKeys = ["practiceTopics", "practiceQuestions", "quizLevels", "videos", "studyWall", "studyTopics", "appConfig"];
+    const validKeys = ["practiceTopics", "practiceQuestions", "quizLevels", "videos", "studyWall", "studyTopics", "studyContents", "appConfig"];
     if (!validKeys.includes(cacheKey)) {
       return res.status(400).json({ error: { message: `Invalid cacheKey. Must be one of: ${validKeys.join(", ")}` } });
     }

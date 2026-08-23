@@ -124,6 +124,31 @@ async function getStudyTopics() {
   return data;
 }
 
+// ─── Study Content (per topicId) ──────────────────────────────────────────────
+
+const studyContentsCache = { data: null };
+
+async function getStudyContent(topicId) {
+  // Load all studyContents into cache if not already
+  if (studyContentsCache.data === null) {
+    const snapshot = await db.ref("studyContents").once("value");
+    studyContentsCache.data = snapshot.exists() ? snapshot.val() : {};
+    const count = Object.keys(studyContentsCache.data).length;
+    console.log(`[content.service] Study contents cache loaded: ${count} items`);
+  }
+
+  // Filter by topicId
+  const allContents = studyContentsCache.data;
+  const filtered = {};
+  for (const [id, content] of Object.entries(allContents)) {
+    if (content && content.topicId === topicId) {
+      filtered[id] = content;
+    }
+  }
+
+  return Object.keys(filtered).length > 0 ? filtered : null;
+}
+
 // ─── App Config (combined settings) ───────────────────────────────────────────
 
 async function getAppConfig() {
@@ -189,6 +214,10 @@ function invalidate(cacheKey, topicId) {
       studyTopicsCache.data = null;
       console.log(`[content.service] Cache invalidated: studyTopics`);
       break;
+    case "studyContents":
+      studyContentsCache.data = null;
+      console.log(`[content.service] Cache invalidated: studyContents`);
+      break;
     case "appConfig":
       appConfigCache.data = null;
       console.log(`[content.service] Cache invalidated: appConfig`);
@@ -210,6 +239,7 @@ function invalidateAll() {
   videosCache.data = null;
   studyWallCache.data = null;
   studyTopicsCache.data = null;
+  studyContentsCache.data = null;
   appConfigCache.data = null;
   console.log(`[content.service] All content caches invalidated`);
 }
@@ -221,6 +251,7 @@ module.exports = {
   getVideos,
   getStudyWall,
   getStudyTopics,
+  getStudyContent,
   getAppConfig,
   invalidate,
   invalidateAll,
