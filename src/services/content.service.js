@@ -105,6 +105,25 @@ async function getStudyWall() {
   return data;
 }
 
+// ─── Study Topics ─────────────────────────────────────────────────────────────
+
+const studyTopicsCache = { data: null };
+
+async function getStudyTopics() {
+  if (studyTopicsCache.data !== null) {
+    return studyTopicsCache.data;
+  }
+
+  const snapshot = await db.ref("studyTopics").once("value");
+  const data = snapshot.exists() ? snapshot.val() : [];
+
+  studyTopicsCache.data = data;
+  const count = Array.isArray(data) ? data.length : Object.keys(data).length;
+  console.log(`[content.service] Study topics cache loaded: ${count} topics`);
+
+  return data;
+}
+
 // ─── App Config (combined settings) ───────────────────────────────────────────
 
 async function getAppConfig() {
@@ -166,6 +185,10 @@ function invalidate(cacheKey, topicId) {
       studyWallCache.data = null;
       console.log(`[content.service] Cache invalidated: studyWall`);
       break;
+    case "studyTopics":
+      studyTopicsCache.data = null;
+      console.log(`[content.service] Cache invalidated: studyTopics`);
+      break;
     case "appConfig":
       appConfigCache.data = null;
       console.log(`[content.service] Cache invalidated: appConfig`);
@@ -186,6 +209,7 @@ function invalidateAll() {
   quizLevelsCache.data = null;
   videosCache.data = null;
   studyWallCache.data = null;
+  studyTopicsCache.data = null;
   appConfigCache.data = null;
   console.log(`[content.service] All content caches invalidated`);
 }
@@ -196,6 +220,7 @@ module.exports = {
   getQuizLevels,
   getVideos,
   getStudyWall,
+  getStudyTopics,
   getAppConfig,
   invalidate,
   invalidateAll,
