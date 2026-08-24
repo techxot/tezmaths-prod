@@ -44,6 +44,7 @@ app.use((err, req, res, _next) => {
 const { processScheduledNotifications } = require("./services/notifications.service");
 cron.schedule("0 6,8,10,12,14,16,18,20,22,0 * * *", async () => {
     console.log("Running scheduled notifications check...");
+    console.log("Running scheduled notifications check...");
     try { await processScheduledNotifications(); }
     catch (e) { console.error("Cron error:", e.message); }
 }, { timezone: "Asia/Kolkata" });
