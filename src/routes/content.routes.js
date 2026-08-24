@@ -92,8 +92,9 @@ router.get("/study-content/:topicId", verifyFirebaseToken, async (req, res) => {
     if (!topicId) {
       return res.status(400).json({ error: { message: "topicId is required" } });
     }
+
     const data = await getStudyContent(topicId);
-    return res.json({ studyContent: data, topicId });
+    return res.json({ studyContent: data });
   } catch (error) {
     console.error("[content] GET /study-content/:topicId error:", error.message);
     return res.status(500).json({ error: { message: "Failed to fetch study content" } });

@@ -235,7 +235,47 @@ async function getStudyWall() {
   return data;
 }
 
-// ─── App Config ───────────────────────────────────────────────────────────────
+// ─── Study Topics ─────────────────────────────────────────────────────────────
+
+const studyTopicsCache = { data: null };
+
+async function getStudyTopics() {
+  if (studyTopicsCache.data !== null) {
+    return studyTopicsCache.data;
+  }
+
+  const snapshot = await db.ref("studyTopics").once("value");
+  const data = snapshot.exists() ? snapshot.val() : [];
+
+  studyTopicsCache.data = data;
+  const count = Array.isArray(data) ? data.length : Object.keys(data).length;
+  console.log(`[content.service] Study topics cache loaded: ${count} topics`);
+
+  return data;
+}
+
+// ─── Study Content (per topicId) ──────────────────────────────────────────────
+
+const studyContentsCache = new Map(); // keyed by topicId
+
+async function getStudyContent(topicId) {
+  const cached = studyContentsCache.get(topicId);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  // Data is nested: studyContents/{topicId}/{contentId}
+  const snapshot = await db.ref(`studyContents/${topicId}`).once("value");
+  const data = snapshot.exists() ? snapshot.val() : null;
+
+  studyContentsCache.set(topicId, data);
+  const count = data ? Object.keys(data).length : 0;
+  console.log(`[content.service] Study content cache loaded for topic ${topicId}: ${count} items`);
+
+  return data;
+}
+
+// ─── App Config (combined settings) ───────────────────────────────────────────
 
 async function getAppConfig() {
   await warmup();
@@ -351,19 +391,11 @@ async function invalidate(cacheKey, topicId) {
       break;
     case "studyTopics":
       studyTopicsCache.data = null;
-      await deleteFromFbCache("studyTopics");
       console.log(`[content.service] Cache invalidated: studyTopics`);
       break;
     case "studyContents":
-      if (topicId) {
-        studyContentsCache.delete(topicId);
-        await deleteFromFbCache(`studyContents/${topicId}`);
-        console.log(`[content.service] Cache invalidated: studyContents/${topicId}`);
-      } else {
-        studyContentsCache.clear();
-        await deleteFromFbCache("studyContents");
-        console.log(`[content.service] Cache invalidated: all studyContents`);
-      }
+      studyContentsCache.clear();
+      console.log(`[content.service] Cache invalidated: studyContents`);
       break;
     case "appConfig":
       appConfigCache.data = null;
