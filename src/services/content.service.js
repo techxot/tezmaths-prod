@@ -237,8 +237,6 @@ async function getStudyWall() {
 
 // ─── Study Topics ─────────────────────────────────────────────────────────────
 
-const studyTopicsCache = { data: null };
-
 async function getStudyTopics() {
   if (studyTopicsCache.data !== null) {
     return studyTopicsCache.data;
@@ -255,8 +253,6 @@ async function getStudyTopics() {
 }
 
 // ─── Study Content (per topicId) ──────────────────────────────────────────────
-
-const studyContentsCache = new Map(); // keyed by topicId
 
 async function getStudyContent(topicId) {
   const cached = studyContentsCache.get(topicId);
