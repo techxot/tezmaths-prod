@@ -22,6 +22,8 @@ const quizLevelsCache = { data: null };
 const videosCache = { data: null };
 const studyWallCache = { data: null };
 const appConfigCache = { data: null };
+const studyTopicsCache = { data: null };
+const studyContentsCache = new Map(); // keyed by topicId
 
 // ─── Firebase persistent cache helpers ───────────────────────────────────────
 
@@ -84,6 +86,19 @@ function warmup() {
       if (cached.appConfig?.data !== undefined) {
         appConfigCache.data = cached.appConfig.data;
         console.log(`[content.service] ✅ appConfig warmed from _cache`);
+      }
+      if (cached.studyTopics?.data !== undefined) {
+        studyTopicsCache.data = cached.studyTopics.data;
+        console.log(`[content.service] ✅ studyTopics warmed from _cache`);
+      }
+      // studyContents are per-topicId — load all cached topics
+      if (cached.studyContents) {
+        for (const [topicId, entry] of Object.entries(cached.studyContents)) {
+          if (entry && entry.data !== undefined) {
+            studyContentsCache.set(topicId, entry.data);
+          }
+        }
+        console.log(`[content.service] ✅ studyContents warmed: ${studyContentsCache.size} topics`);
       }
       // practiceQuestions are per-topicId — load all cached topics
       if (cached.practiceQuestions) {
@@ -220,7 +235,47 @@ async function getStudyWall() {
   return data;
 }
 
-// ─── App Config ───────────────────────────────────────────────────────────────
+// ─── Study Topics ─────────────────────────────────────────────────────────────
+
+const studyTopicsCache = { data: null };
+
+async function getStudyTopics() {
+  if (studyTopicsCache.data !== null) {
+    return studyTopicsCache.data;
+  }
+
+  const snapshot = await db.ref("studyTopics").once("value");
+  const data = snapshot.exists() ? snapshot.val() : [];
+
+  studyTopicsCache.data = data;
+  const count = Array.isArray(data) ? data.length : Object.keys(data).length;
+  console.log(`[content.service] Study topics cache loaded: ${count} topics`);
+
+  return data;
+}
+
+// ─── Study Content (per topicId) ──────────────────────────────────────────────
+
+const studyContentsCache = new Map(); // keyed by topicId
+
+async function getStudyContent(topicId) {
+  const cached = studyContentsCache.get(topicId);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  // Data is nested: studyContents/{topicId}/{contentId}
+  const snapshot = await db.ref(`studyContents/${topicId}`).once("value");
+  const data = snapshot.exists() ? snapshot.val() : null;
+
+  studyContentsCache.set(topicId, data);
+  const count = data ? Object.keys(data).length : 0;
+  console.log(`[content.service] Study content cache loaded for topic ${topicId}: ${count} items`);
+
+  return data;
+}
+
+// ─── App Config (combined settings) ───────────────────────────────────────────
 
 async function getAppConfig() {
   await warmup();
@@ -233,11 +288,12 @@ async function getAppConfig() {
     return fbData;
   }
 
-  const [adSettingsSnap, subscriptionPricingSnap, practiceTimerSnap, practiceLevelSnap] = await Promise.all([
+  const [adSettingsSnap, subscriptionPricingSnap, practiceTimerSnap, practiceLevelSnap, featureLocksSnap] = await Promise.all([
     db.ref("adSettings").once("value"),
     db.ref("subscriptionPricing").once("value"),
     db.ref("practiceTimerDurations").once("value"),
     db.ref("practiceLevelSettings").once("value"),
+    db.ref("featureLocks").once("value"),
   ]);
 
   const data = {
@@ -245,11 +301,56 @@ async function getAppConfig() {
     subscriptionPricing: subscriptionPricingSnap.exists() ? subscriptionPricingSnap.val() : {},
     practiceTimerDurations: practiceTimerSnap.exists() ? practiceTimerSnap.val() : {},
     practiceLevelSettings: practiceLevelSnap.exists() ? practiceLevelSnap.val() : {},
+    featureLocks: featureLocksSnap.exists() ? featureLocksSnap.val() : {},
   };
 
   appConfigCache.data = data;
   console.log(`[content.service] App config cache loaded: adSettings, subscriptionPricing, practiceTimerDurations, practiceLevelSettings`);
   await saveToFbCache("appConfig", data);
+  return data;
+}
+
+// ─── Study Topics ─────────────────────────────────────────────────────────────
+
+async function getStudyTopics() {
+  await warmup();
+  if (studyTopicsCache.data !== null) return studyTopicsCache.data;
+
+  const fbData = await loadFromFbCache("studyTopics");
+  if (fbData !== null) {
+    studyTopicsCache.data = fbData;
+    console.log(`[content.service] ✅ studyTopics loaded from _cache`);
+    return fbData;
+  }
+
+  const snapshot = await db.ref("studyTopics").once("value");
+  const data = snapshot.exists() ? snapshot.val() : {};
+  studyTopicsCache.data = data;
+  const count = typeof data === "object" ? Object.keys(data).length : 0;
+  console.log(`[content.service] Study topics cache loaded: ${count} topics`);
+  await saveToFbCache("studyTopics", data);
+  return data;
+}
+
+// ─── Study Contents (per topicId) ─────────────────────────────────────────────
+
+async function getStudyContent(topicId) {
+  await warmup();
+  if (studyContentsCache.has(topicId)) return studyContentsCache.get(topicId);
+
+  const fbData = await loadFromFbCache(`studyContents/${topicId}`);
+  if (fbData !== null) {
+    studyContentsCache.set(topicId, fbData);
+    console.log(`[content.service] ✅ studyContents/${topicId} loaded from _cache`);
+    return fbData;
+  }
+
+  const snapshot = await db.ref(`studyContents/${topicId}`).once("value");
+  const data = snapshot.exists() ? snapshot.val() : {};
+  studyContentsCache.set(topicId, data);
+  const count = typeof data === "object" ? Object.keys(data).length : 0;
+  console.log(`[content.service] Study contents cache loaded for topic ${topicId}: ${count} items`);
+  await saveToFbCache(`studyContents/${topicId}`, data);
   return data;
 }
 
@@ -288,6 +389,14 @@ async function invalidate(cacheKey, topicId) {
       await deleteFromFbCache("studyWall");
       console.log(`[content.service] Cache invalidated: studyWall`);
       break;
+    case "studyTopics":
+      studyTopicsCache.data = null;
+      console.log(`[content.service] Cache invalidated: studyTopics`);
+      break;
+    case "studyContents":
+      studyContentsCache.clear();
+      console.log(`[content.service] Cache invalidated: studyContents`);
+      break;
     case "appConfig":
       appConfigCache.data = null;
       await deleteFromFbCache("appConfig");
@@ -306,6 +415,8 @@ async function invalidateAll() {
   quizLevelsCache.data = null;
   videosCache.data = null;
   studyWallCache.data = null;
+  studyTopicsCache.data = null;
+  studyContentsCache.clear();
   appConfigCache.data = null;
   try { await db.ref("_cache/content").remove(); } catch (_) {}
   console.log(`[content.service] All content caches invalidated`);
@@ -317,6 +428,8 @@ module.exports = {
   getQuizLevels,
   getVideos,
   getStudyWall,
+  getStudyTopics,
+  getStudyContent,
   getAppConfig,
   invalidate,
   invalidateAll,
