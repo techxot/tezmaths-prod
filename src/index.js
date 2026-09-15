@@ -22,6 +22,7 @@ const leaderboardRouter = require("./routes/leaderboard.routes");
 const adminRouter = require("./routes/admin.routes");
 const quizzesRouter = require("./routes/quizzes.routes");
 const contentRouter = require("./routes/content.routes");
+const userRouter = require("./routes/user.routes");
 
 app.use("/api/payments", paymentsRouter);
 app.use("/api/notifications", notificationsRouter);
@@ -30,6 +31,7 @@ app.use("/api/leaderboard", leaderboardRouter);
 app.use("/api/admin", adminRouter);
 app.use("/api/quizzes", quizzesRouter);
 app.use("/api/content", contentRouter);
+app.use("/api/user", userRouter);
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get("/health", (_req, res) => res.json({ status: "ok", timestamp: new Date().toISOString() }));
