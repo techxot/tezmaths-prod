@@ -4,11 +4,17 @@ const { db } = require("../config/firebase");
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function addMonthsFrom(baseTimestamp, duration) {
-  const baseDate = baseTimestamp ? new Date(baseTimestamp) : new Date();
   const now = new Date();
+  const baseDate = baseTimestamp ? new Date(baseTimestamp) : now;
+  // If baseDate is still in the future, extend from baseDate; otherwise start from now
   const start = baseDate.getTime() > now.getTime() ? baseDate : now;
-  const next = new Date(start);
-  next.setMonth(next.getMonth() + (duration === "yearly" ? 12 : 1));
+  const next = new Date(start.getTime());
+
+  if (duration === "yearly") {
+    next.setFullYear(next.getFullYear() + 1);
+  } else {
+    next.setMonth(next.getMonth() + 1);
+  }
   return next.getTime();
 }
 
@@ -63,19 +69,22 @@ async function cancelSubscription(userId) {
     throw new Error("No active subscription found for this user.");
   }
 
-  // cancel() returns the subscription object with current_end
-  const cancelledSub = await razorpay.subscriptions.cancel(user.razorpaySubscriptionId, true);
+  // cancel() with false cancels immediately so bank mandate is revoked
+  const cancelledSub = await razorpay.subscriptions.cancel(user.razorpaySubscriptionId, false);
 
-  // current_end is Unix seconds → convert to ms. Fallback to existing value if missing.
-  const endDate = cancelledSub.current_end
-    ? cancelledSub.current_end * 1000
-    : (user.subscriptionEndDate || Date.now());
+  // current_end is Unix seconds → convert to ms.
+  const razorpayEndMs = cancelledSub.current_end ? cancelledSub.current_end * 1000 : null;
+  // If user already has a valid yearly subscriptionEndDate in the future, don't shrink it
+  const existingEndDate = user.subscriptionEndDate || null;
+  const endDate = existingEndDate && existingEndDate > Date.now()
+    ? existingEndDate
+    : (razorpayEndMs || Date.now());
 
   await db.ref(`users/${userId}/profile`).update({
     autoRenew: false,
     subscriptionStatus: "cancelled",
     cancelledAt: Date.now(),
-    subscriptionEndDate: endDate,   // ← accurate end date written here
+    subscriptionEndDate: endDate,
   });
 
   await writePaymentLog(userId, `cancel_${Date.now()}`, {
@@ -90,8 +99,23 @@ async function cancelSubscription(userId) {
 // ─── Create Order (one-time payment fallback) ─────────────────────────────────
 
 async function createOrder({ userId, amount, planId, duration }) {
+  // Security Fix: Validate price from Firebase to prevent client-side price tampering
+  let finalAmount = amount;
+  if (planId) {
+    try {
+      const snap = await db.ref(`subscriptionPricing/${planId}`).once("value");
+      const pricing = snap.val();
+      if (pricing && pricing.price) {
+        finalAmount = Number(pricing.price);
+        console.log(`[createOrder] Server-validated price for ${planId}: ₹${finalAmount} (Client sent: ₹${amount})`);
+      }
+    } catch (err) {
+      console.warn("[createOrder] Could not validate price against DB, using client amount:", err.message);
+    }
+  }
+
   const order = await razorpay.orders.create({
-    amount: Math.round(amount * 100), // paise
+    amount: Math.round(finalAmount * 100), // paise
     currency: "INR",
     receipt: `rcpt_${userId}_${Date.now()}`.slice(0, 40),
     notes: { userId, planId: planId || "", duration: duration || "monthly" },
@@ -100,7 +124,7 @@ async function createOrder({ userId, amount, planId, duration }) {
   await writePaymentLog(userId, order.id, {
     type: "order_created",
     orderId: order.id,
-    amount,
+    amount: finalAmount,
     planId,
     duration,
   });
@@ -121,10 +145,29 @@ async function handleWebhookEvent(event, payload) {
     paymentEntity?.notes?.userId ||
     null;
 
-  const duration =
-    entity?.notes?.duration === "yearly" ? "yearly" : "monthly";
+  const rawDuration =
+    entity?.notes?.duration ||
+    subscriptionEntity?.notes?.duration ||
+    paymentEntity?.notes?.duration ||
+    null;
 
-  console.log(`Webhook: ${event} | userId: ${userId || "N/A"}`);
+  let duration = rawDuration;
+
+  // If duration is not directly provided in notes, check user's saved subscriptionDuration or plan_id
+  if (!duration && userId) {
+    try {
+      const snap = await db.ref(`users/${userId}/profile`).once("value");
+      const prof = snap.val() || {};
+      duration = prof.subscriptionDuration || (prof.subscriptionPlan === "yearly" ? "yearly" : null);
+    } catch (e) {
+      console.warn("Failed to check profile for duration:", e.message);
+    }
+  }
+
+  // Fallback if still unknown
+  duration = duration === "yearly" ? "yearly" : "monthly";
+
+  console.log(`Webhook: ${event} | userId: ${userId || "N/A"} | duration: ${duration}`);
 
   if (!userId) {
     console.warn("Webhook: No userId in notes, skipping");
@@ -134,6 +177,11 @@ async function handleWebhookEvent(event, payload) {
   const userRef = db.ref(`users/${userId}/profile`);
 
   if (event === "subscription.authenticated" || event === "subscription.activated") {
+    const razorpayEndMs = subscriptionEntity?.current_end ? subscriptionEntity.current_end * 1000 : null;
+    const initialEndDate = (razorpayEndMs && razorpayEndMs > Date.now()) 
+      ? razorpayEndMs 
+      : addMonthsFrom(Date.now(), duration);
+
     await userRef.update({
       subscriptionStatus: "active",
       autoRenew: true,
@@ -142,21 +190,31 @@ async function handleWebhookEvent(event, payload) {
       subscriptionDuration: duration,
       subscriptionPlan: subscriptionEntity?.plan_id || entity?.plan_id || null,
       subscriptionStartDate: Date.now(),
+      subscriptionEndDate: initialEndDate,
       subscriptionLabel: duration === "yearly" ? "Yearly" : "Monthly",
     });
     await writePaymentLog(userId, `activated_${Date.now()}`, {
       type: event,
       subscriptionId: subscriptionEntity?.id || entity?.id || null,
       duration,
+      initialEndDate,
     });
-    console.log(`Activated: ${userId}`);
+    console.log(`Activated: ${userId} → initial end: ${new Date(initialEndDate).toISOString()}`);
     return;
   }
 
   if (event === "subscription.charged") {
-    const endDateSnap = await userRef.child("subscriptionEndDate").once("value");
-    const currentEndDate = endDateSnap.val() || null;
-    const newEndDate = addMonthsFrom(currentEndDate, duration);
+    // Check if Razorpay provided current_end (seconds) in subscription entity
+    const razorpayEndMs = subscriptionEntity?.current_end ? subscriptionEntity.current_end * 1000 : null;
+
+    let newEndDate;
+    if (razorpayEndMs && razorpayEndMs > Date.now()) {
+      newEndDate = razorpayEndMs;
+    } else {
+      const endDateSnap = await userRef.child("subscriptionEndDate").once("value");
+      const currentEndDate = endDateSnap.val() || null;
+      newEndDate = addMonthsFrom(currentEndDate, duration);
+    }
 
     await userRef.update({
       isPremium: true,
@@ -181,18 +239,24 @@ async function handleWebhookEvent(event, payload) {
   }
 
   if (event === "subscription.cancelled") {
-    const endDate = subscriptionEntity?.current_end
+    const razorpayEndMs = subscriptionEntity?.current_end
       ? subscriptionEntity.current_end * 1000
       : null;
+
+    const endSnap = await userRef.child("subscriptionEndDate").once("value");
+    const existingEndDate = endSnap.val() || null;
+    const finalEndDate = existingEndDate && existingEndDate > Date.now()
+      ? existingEndDate
+      : (razorpayEndMs || Date.now());
 
     await userRef.update({
       autoRenew: false,
       subscriptionStatus: "cancelled",
       cancelledAt: Date.now(),
-      ...(endDate && { subscriptionEndDate: endDate }),  // only overwrite if Razorpay provides it
+      subscriptionEndDate: finalEndDate,
     });
     await writePaymentLog(userId, `cancelled_${Date.now()}`, { type: "subscription_cancelled", subscriptionId: subscriptionEntity?.id || entity?.id || null });
-    console.log(`Cancelled: ${userId}`);
+    console.log(`Cancelled: ${userId} → preserved end: ${new Date(finalEndDate).toISOString()}`);
     return;
   }
 
