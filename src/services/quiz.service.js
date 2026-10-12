@@ -145,6 +145,48 @@ async function invalidateAll() {
 }
 
 /**
+ * Get random lightweight questions for battles.
+ * Gathers questions from levels 1-10, picks `count` randomly, and returns
+ * ONLY the fields needed for the battle UI (~15 KB instead of 2.5 MB).
+ */
+async function getBattleQuestions(count = 25) {
+  const pool = [];
+  for (let lvl = 1; lvl <= 10; lvl++) {
+    const quizzes = await getQuizzesByLevel(lvl);
+    if (Array.isArray(quizzes)) {
+      for (const qz of quizzes) {
+        if (Array.isArray(qz.questions)) {
+          for (const q of qz.questions) {
+            const questionText = q.questionText || q.question;
+            const correctAnswer = q.correctAnswer !== undefined ? String(q.correctAnswer) : "";
+            if (questionText && correctAnswer) {
+              pool.push({
+                question: questionText,
+                questionText: questionText,
+                correctAnswer: correctAnswer,
+                options: q.options || [],
+                timeLimit: 15,
+                points: 4,
+                explanation: q.explanation || "",
+                level: lvl,
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Shuffle pool (Fisher-Yates)
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+
+  return pool.slice(0, count);
+}
+
+/**
  * Get cache stats for monitoring.
  */
 function getCacheStats() {
@@ -159,4 +201,4 @@ function getCacheStats() {
   return stats;
 }
 
-module.exports = { getQuizzesByLevel, invalidateLevel, invalidateAll, getCacheStats };
+module.exports = { getQuizzesByLevel, getBattleQuestions, invalidateLevel, invalidateAll, getCacheStats };

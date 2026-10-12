@@ -23,32 +23,46 @@ async function migrateLeaderboard() {
   let skipped = 0;
 
   for (const [userId, user] of Object.entries(users)) {
+    if (!user || typeof user !== "object") continue;
+
+    const email = (user.profile?.email || user.email || "").toLowerCase().trim();
+    const rawUsername = (user.profile?.username || user.username || "").trim();
+    const rawFullName = (user.profile?.fullName || user.fullName || "").trim();
+
     // Skip admin accounts
-    if (user.email === "tezmaths@admin.com") {
-      skipped++;
-      continue;
-    }
-    if ((user.username || "").toLowerCase() === "admin") {
-      skipped++;
-      continue;
-    }
-    // Skip users with no name data at all
-    if (!user.username && !user.fullName) {
+    if (email === "tezmaths@admin.com" || rawUsername.toLowerCase() === "admin") {
       skipped++;
       continue;
     }
 
+    // Skip users with no name data at all
+    if (!rawUsername && !rawFullName) {
+      skipped++;
+      continue;
+    }
+
+    const rawScore = user.stats?.highScore !== undefined ? user.stats.highScore : user.highScore;
+    const highScore = typeof rawScore === "number" && !isNaN(rawScore) ? Math.max(0, rawScore) : 0;
+
+    const rawTime = user.stats?.highScoreTime !== undefined ? user.stats.highScoreTime : user.highScoreTime;
+    const highScoreTime = typeof rawTime === "number" && !isNaN(rawTime) ? Math.max(0, rawTime) : 0;
+
     updates[`leaderboard/${userId}`] = {
-      username: user.username || "Unknown",
-      fullName: user.fullName || "Unknown",
-      highScore: user.highScore || user.totalPoints || 0,
-      highScoreTime: user.highScoreTime || 0,
+      username: rawUsername || "Unknown",
+      fullName: rawFullName || "Unknown",
+      highScore,
+      highScoreTime,
     };
     count++;
   }
 
   if (Object.keys(updates).length > 0) {
-    await db.ref().update(updates);
+    const entries = Object.entries(updates);
+    const BATCH_SIZE = 250;
+    for (let i = 0; i < entries.length; i += BATCH_SIZE) {
+      const chunk = Object.fromEntries(entries.slice(i, i + BATCH_SIZE));
+      await db.ref().update(chunk);
+    }
   }
 
   console.log(`✅ Migrated ${count} users to /leaderboard node`);

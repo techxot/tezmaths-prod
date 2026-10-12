@@ -18,7 +18,6 @@ const { db } = require("../config/firebase");
 
 let cachedUsers = null;
 let cacheTimestamp = 0;
-let userListener = null;
 
 const FIREBASE_CACHE_PATH = "_cache/adminUsers";
 
@@ -58,6 +57,8 @@ function stripUserToAdminFields(id, user) {
   return stripped;
 }
 
+const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour memory TTL
+
 // ─── Firebase persistent cache ────────────────────────────────────────────────
 
 async function loadFromFirebaseCache() {
@@ -66,6 +67,7 @@ async function loadFromFirebaseCache() {
     if (!snap.exists()) return false;
     const entry = snap.val();
     if (!entry || !Array.isArray(entry.users) || entry.users.length === 0) return false;
+    if (Date.now() - (entry.timestamp || 0) > CACHE_TTL_MS) return false; // expired
     cachedUsers = entry.users;
     cacheTimestamp = entry.timestamp || Date.now();
     const sizeKB = Math.round(JSON.stringify(cachedUsers).length / 1024);
@@ -77,27 +79,11 @@ async function loadFromFirebaseCache() {
   }
 }
 
-// Debounced Firebase cache save — avoid hammering on rapid consecutive updates
-let fbSaveTimer = null;
-function scheduleFirebaseSave() {
-  if (fbSaveTimer) clearTimeout(fbSaveTimer);
-  fbSaveTimer = setTimeout(async () => {
-    fbSaveTimer = null;
-    try {
-      await db.ref(FIREBASE_CACHE_PATH).set({
-        users: cachedUsers,
-        timestamp: Date.now(),
-      });
-    } catch (err) {
-      console.warn("[admin.service] Firebase cache save failed:", err.message);
-    }
-  }, 5000); // batch updates, write 5s after last change
-}
-
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 
 async function bootstrapUsersCache() {
-  if (cachedUsers !== null) return; // already loaded
+  const now = Date.now();
+  if (cachedUsers !== null && now - cacheTimestamp < CACHE_TTL_MS) return; // cache is fresh
 
   // L1: Try Firebase cache node first (survives Railway deploys)
   const fromCache = await loadFromFirebaseCache();
@@ -119,50 +105,13 @@ async function bootstrapUsersCache() {
       cacheTimestamp = Date.now();
       const strippedKB = Math.round(JSON.stringify(cachedUsers).length / 1024);
       console.log(`[admin.service] ⚠️  Downloaded ${rawMB} MB in ${elapsed}ms → stripped to ${strippedKB} KB, saving to _cache/adminUsers`);
-      // Save immediately (not debounced) so next deploy doesn't re-download
+      // Save once on cold start
       await db.ref(FIREBASE_CACHE_PATH).set({ users: cachedUsers, timestamp: cacheTimestamp });
     } else {
       cachedUsers = [];
+      cacheTimestamp = Date.now();
     }
   }
-
-  // Attach incremental listener to keep cache current
-  attachIncrementalListener();
-}
-
-function attachIncrementalListener() {
-  if (userListener) return;
-
-  const usersRef = db.ref("users");
-
-  const onChildChanged = usersRef.on("child_changed", (snap) => {
-    if (!cachedUsers) return;
-    const uid = snap.key;
-    const updated = stripUserToAdminFields(uid, snap.val() || {});
-    if (updated.email === "tezmaths@admin.com") return;
-    const idx = cachedUsers.findIndex((u) => u.id === uid);
-    if (idx >= 0) cachedUsers[idx] = updated;
-    scheduleFirebaseSave();
-  });
-
-  const onChildAdded = usersRef.on("child_added", (snap) => {
-    if (!cachedUsers) return;
-    const uid = snap.key;
-    if (cachedUsers.some((u) => u.id === uid)) return; // skip existing on initial attach
-    const stripped = stripUserToAdminFields(uid, snap.val() || {});
-    if (stripped.email === "tezmaths@admin.com") return;
-    cachedUsers.unshift(stripped);
-    scheduleFirebaseSave();
-  });
-
-  const onChildRemoved = usersRef.on("child_removed", (snap) => {
-    if (!cachedUsers) return;
-    cachedUsers = cachedUsers.filter((u) => u.id !== snap.key);
-    scheduleFirebaseSave();
-  });
-
-  userListener = { usersRef, onChildChanged, onChildAdded, onChildRemoved };
-  console.log("[admin.service] ✅ Incremental user listener attached");
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -195,12 +144,6 @@ async function getUsers({ page = 1, limit = 50, search = "" } = {}) {
 async function invalidateCache() {
   cachedUsers = null;
   cacheTimestamp = 0;
-  if (userListener) {
-    userListener.usersRef.off("child_changed", userListener.onChildChanged);
-    userListener.usersRef.off("child_added", userListener.onChildAdded);
-    userListener.usersRef.off("child_removed", userListener.onChildRemoved);
-    userListener = null;
-  }
   try { await db.ref(FIREBASE_CACHE_PATH).remove(); } catch (_) {}
   console.log("[admin.service] Cache invalidated");
 }
