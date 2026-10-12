@@ -21,6 +21,7 @@ router.get("/", async (req, res) => {
     }
 
     const result = await getLeaderboard(userId);
+    res.set("Cache-Control", "public, max-age=120, stale-while-revalidate=60");
     return res.json(result);
   } catch (error) {
     console.error("Leaderboard error:", error.message);
