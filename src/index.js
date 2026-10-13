@@ -4,12 +4,15 @@ const cron = require("node-cron");
 const { config } = require("dotenv");
 config();
 
+const compression = require("compression");
+
 const app = express();
 
 // ─── CRITICAL: Webhook route needs raw body — must be BEFORE express.json() ──
 app.use("/api/payments/webhook", express.raw({ type: "application/json" }));
 
 // ─── Standard middleware ──────────────────────────────────────────────────────
+app.use(compression());
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

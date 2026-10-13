@@ -18,6 +18,7 @@ const {
 router.get("/practice-topics", verifyFirebaseToken, async (req, res) => {
   try {
     const data = await getPracticeTopics();
+    res.set("Cache-Control", "public, max-age=3600, stale-while-revalidate=600");
     return res.json({ practiceTopics: data });
   } catch (error) {
     console.error("[content] GET /practice-topics error:", error.message);
@@ -34,6 +35,7 @@ router.get("/practice-questions/:topicId", verifyFirebaseToken, async (req, res)
     }
 
     const data = await getPracticeQuestions(topicId);
+    res.set("Cache-Control", "public, max-age=3600, stale-while-revalidate=600");
     return res.json({ practiceQuestions: data, topicId });
   } catch (error) {
     console.error("[content] GET /practice-questions/:topicId error:", error.message);
@@ -45,6 +47,7 @@ router.get("/practice-questions/:topicId", verifyFirebaseToken, async (req, res)
 router.get("/quiz-levels", verifyFirebaseToken, async (req, res) => {
   try {
     const data = await getQuizLevels();
+    res.set("Cache-Control", "public, max-age=3600, stale-while-revalidate=600");
     return res.json({ quizLevels: data });
   } catch (error) {
     console.error("[content] GET /quiz-levels error:", error.message);
@@ -56,6 +59,7 @@ router.get("/quiz-levels", verifyFirebaseToken, async (req, res) => {
 router.get("/videos", verifyFirebaseToken, async (req, res) => {
   try {
     const data = await getVideos();
+    res.set("Cache-Control", "public, max-age=3600, stale-while-revalidate=600");
     return res.json({ videos: data });
   } catch (error) {
     console.error("[content] GET /videos error:", error.message);
@@ -67,6 +71,7 @@ router.get("/videos", verifyFirebaseToken, async (req, res) => {
 router.get("/study-wall", verifyFirebaseToken, async (req, res) => {
   try {
     const data = await getStudyWall();
+    res.set("Cache-Control", "public, max-age=3600, stale-while-revalidate=600");
     return res.json({ studyWall: data });
   } catch (error) {
     console.error("[content] GET /study-wall error:", error.message);
@@ -78,6 +83,7 @@ router.get("/study-wall", verifyFirebaseToken, async (req, res) => {
 router.get("/study-topics", verifyFirebaseToken, async (req, res) => {
   try {
     const data = await getStudyTopics();
+    res.set("Cache-Control", "public, max-age=3600, stale-while-revalidate=600");
     return res.json({ studyTopics: data });
   } catch (error) {
     console.error("[content] GET /study-topics error:", error.message);
@@ -94,6 +100,7 @@ router.get("/study-content/:topicId", verifyFirebaseToken, async (req, res) => {
     }
 
     const data = await getStudyContent(topicId);
+    res.set("Cache-Control", "public, max-age=3600, stale-while-revalidate=600");
     return res.json({ studyContent: data });
   } catch (error) {
     console.error("[content] GET /study-content/:topicId error:", error.message);
@@ -105,6 +112,7 @@ router.get("/study-content/:topicId", verifyFirebaseToken, async (req, res) => {
 router.get("/app-config", verifyFirebaseToken, async (req, res) => {
   try {
     const data = await getAppConfig();
+    res.set("Cache-Control", "public, max-age=1800, stale-while-revalidate=300");
     return res.json({ appConfig: data });
   } catch (error) {
     console.error("[content] GET /app-config error:", error.message);

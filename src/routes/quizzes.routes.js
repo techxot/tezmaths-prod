@@ -1,7 +1,21 @@
 const express = require("express");
 const router = express.Router();
 const { verifyFirebaseToken, verifyAdmin } = require("../middlewares/firebaseAuth.middleware");
-const { getQuizzesByLevel, invalidateLevel, invalidateAll, getCacheStats } = require("../services/quiz.service");
+const { getQuizzesByLevel, getBattleQuestions, invalidateLevel, invalidateAll, getCacheStats } = require("../services/quiz.service");
+
+// ─── GET /api/quizzes/battle-questions ────────────────────────────────────────
+// Lightweight endpoint for battles — returns 25 sampled questions (~15KB)
+router.get("/battle-questions", verifyFirebaseToken, async (req, res) => {
+  try {
+    const count = Math.min(50, Math.max(10, parseInt(req.query.count) || 25));
+    const questions = await getBattleQuestions(count);
+    res.set("Cache-Control", "no-cache"); // Each battle gets fresh randomized questions
+    return res.json({ questions, count: questions.length });
+  } catch (error) {
+    console.error("[quizzes] GET /battle-questions error:", error.message);
+    return res.status(500).json({ error: { message: "Failed to fetch battle questions" } });
+  }
+});
 
 // ─── GET /api/quizzes/:level ─────────────────────────────────────────────────
 // Public endpoint (authenticated users only) — serves cached quiz data
@@ -13,6 +27,7 @@ router.get("/:level", verifyFirebaseToken, async (req, res) => {
     }
 
     const quizzes = await getQuizzesByLevel(level);
+    res.set("Cache-Control", "public, max-age=86400, stale-while-revalidate=3600");
     return res.json({ quizzes, level, count: quizzes.length });
   } catch (error) {
     console.error("[quizzes] GET /:level error:", error.message);
