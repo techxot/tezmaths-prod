@@ -47,45 +47,14 @@ async function deleteFromFirebaseCache(level) {
   } catch (_) {}
 }
 
-// ─── Warm in-memory cache from Firebase cache node on startup ─────────────────
-// Runs once at module init — loads all cached levels into memory so the first
-// request per level is served from memory, not Firebase.
-let warmupPromise = null;
-
-function warmupCache() {
-  if (warmupPromise) return warmupPromise;
-  warmupPromise = (async () => {
-    try {
-      const snap = await db.ref("_cache/quizzes").once("value");
-      if (!snap.exists()) return;
-      const now = Date.now();
-      let loaded = 0;
-      snap.forEach((child) => {
-        const entry = child.val();
-        if (entry && Array.isArray(entry.data) && entry.data.length > 0 && now - entry.timestamp < CACHE_TTL_MS) {
-          quizCache.set(Number(child.key), { data: entry.data, timestamp: entry.timestamp });
-          loaded++;
-        }
-      });
-      if (loaded > 0) console.log(`[quiz.service] ✅ Warmed ${loaded} levels from _cache/quizzes — 0 /quizzes reads needed`);
-    } catch (err) {
-      console.warn("[quiz.service] Cache warmup failed:", err.message);
-    }
-  })();
-  return warmupPromise;
-}
-
-// Kick off warmup immediately on module load
-warmupCache();
-
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
  * Get quizzes for a specific level.
- * Memory → Firebase cache node → real /quizzes/{level} node (last resort).
+ * Memory (0 Firebase reads) → _cache/quizzes/{level} (~30KB) → /quizzes/{level} (fallback ~30KB).
+ * Lazy loaded on-demand: NEVER downloads all levels in bulk.
  */
 async function getQuizzesByLevel(level) {
-  await warmupCache(); // ensure warmup has run before first use
 
   const now = Date.now();
   const cached = quizCache.get(level);
