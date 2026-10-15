@@ -57,7 +57,7 @@ function stripUserToAdminFields(id, user) {
   return stripped;
 }
 
-const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour memory TTL
+const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days persistent TTL
 
 // ─── Firebase persistent cache ────────────────────────────────────────────────
 
@@ -67,7 +67,7 @@ async function loadFromFirebaseCache() {
     if (!snap.exists()) return false;
     const entry = snap.val();
     if (!entry || !Array.isArray(entry.users) || entry.users.length === 0) return false;
-    if (Date.now() - (entry.timestamp || 0) > CACHE_TTL_MS) return false; // expired
+    // Serve persisted stripped users — live listeners keep it fresh
     cachedUsers = entry.users;
     cacheTimestamp = entry.timestamp || Date.now();
     const sizeKB = Math.round(JSON.stringify(cachedUsers).length / 1024);
