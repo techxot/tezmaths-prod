@@ -53,78 +53,11 @@ async function deleteFromFbCache(key) {
   } catch (_) {}
 }
 
-// ─── Warmup on startup ────────────────────────────────────────────────────────
-// Load all cached content into memory on first module require so the first
-// user request per endpoint is served from memory, not Firebase.
-let warmupDone = false;
-let warmupPromise = null;
 
-function warmup() {
-  if (warmupDone || warmupPromise) return warmupPromise || Promise.resolve();
-  warmupPromise = (async () => {
-    try {
-      const snap = await db.ref("_cache/content").once("value");
-      if (!snap.exists()) return;
-      const cached = snap.val();
-
-      if (cached.practiceTopics?.data !== undefined) {
-        practiceTopicsCache.data = cached.practiceTopics.data;
-        console.log(`[content.service] ✅ practiceTopics warmed from _cache`);
-      }
-      if (cached.quizLevels?.data !== undefined) {
-        quizLevelsCache.data = cached.quizLevels.data;
-        console.log(`[content.service] ✅ quizLevels warmed from _cache`);
-      }
-      if (cached.videos?.data !== undefined) {
-        videosCache.data = cached.videos.data;
-        console.log(`[content.service] ✅ videos warmed from _cache`);
-      }
-      if (cached.studyWall?.data !== undefined) {
-        studyWallCache.data = cached.studyWall.data;
-        console.log(`[content.service] ✅ studyWall warmed from _cache`);
-      }
-      if (cached.appConfig?.data !== undefined) {
-        appConfigCache.data = cached.appConfig.data;
-        console.log(`[content.service] ✅ appConfig warmed from _cache`);
-      }
-      if (cached.studyTopics?.data !== undefined) {
-        studyTopicsCache.data = cached.studyTopics.data;
-        console.log(`[content.service] ✅ studyTopics warmed from _cache`);
-      }
-      // studyContents are per-topicId — load all cached topics
-      if (cached.studyContents) {
-        for (const [topicId, entry] of Object.entries(cached.studyContents)) {
-          if (entry && entry.data !== undefined) {
-            studyContentsCache.set(topicId, entry.data);
-          }
-        }
-        console.log(`[content.service] ✅ studyContents warmed: ${studyContentsCache.size} topics`);
-      }
-      // practiceQuestions are per-topicId — load all cached topics
-      if (cached.practiceQuestions) {
-        for (const [topicId, entry] of Object.entries(cached.practiceQuestions)) {
-          if (entry && entry.data !== undefined) {
-            practiceQuestionsCache.set(topicId, entry.data);
-          }
-        }
-        console.log(`[content.service] ✅ practiceQuestions warmed: ${practiceQuestionsCache.size} topics`);
-      }
-    } catch (err) {
-      console.warn("[content.service] Warmup failed:", err.message);
-    } finally {
-      warmupDone = true;
-    }
-  })();
-  return warmupPromise;
-}
-
-// Kick off warmup immediately on module load
-warmup();
 
 // ─── Practice Topics ──────────────────────────────────────────────────────────
 
 async function getPracticeTopics() {
-  await warmup();
   if (practiceTopicsCache.data !== null) return practiceTopicsCache.data;
 
   // L2: Firebase cache node
@@ -148,7 +81,6 @@ async function getPracticeTopics() {
 // ─── Practice Questions (per topicId) ─────────────────────────────────────────
 
 async function getPracticeQuestions(topicId) {
-  await warmup();
   if (practiceQuestionsCache.has(topicId)) return practiceQuestionsCache.get(topicId);
 
   // L2: Firebase cache node
@@ -172,7 +104,6 @@ async function getPracticeQuestions(topicId) {
 // ─── Quiz Levels ──────────────────────────────────────────────────────────────
 
 async function getQuizLevels() {
-  await warmup();
   if (quizLevelsCache.data !== null) return quizLevelsCache.data;
 
   const fbData = await loadFromFbCache("quizLevels");
@@ -194,7 +125,6 @@ async function getQuizLevels() {
 // ─── Videos ───────────────────────────────────────────────────────────────────
 
 async function getVideos() {
-  await warmup();
   if (videosCache.data !== null) return videosCache.data;
 
   const fbData = await loadFromFbCache("videos");
@@ -216,7 +146,6 @@ async function getVideos() {
 // ─── Study Wall ───────────────────────────────────────────────────────────────
 
 async function getStudyWall() {
-  await warmup();
   if (studyWallCache.data !== null) return studyWallCache.data;
 
   const fbData = await loadFromFbCache("studyWall");
@@ -274,7 +203,6 @@ async function getStudyContent(topicId) {
 // ─── App Config (combined settings) ───────────────────────────────────────────
 
 async function getAppConfig() {
-  await warmup();
   if (appConfigCache.data !== null) return appConfigCache.data;
 
   const fbData = await loadFromFbCache("appConfig");
@@ -309,7 +237,6 @@ async function getAppConfig() {
 // ─── Study Topics ─────────────────────────────────────────────────────────────
 
 async function getStudyTopics() {
-  await warmup();
   if (studyTopicsCache.data !== null) return studyTopicsCache.data;
 
   const fbData = await loadFromFbCache("studyTopics");
@@ -331,7 +258,6 @@ async function getStudyTopics() {
 // ─── Study Contents (per topicId) ─────────────────────────────────────────────
 
 async function getStudyContent(topicId) {
-  await warmup();
   if (studyContentsCache.has(topicId)) return studyContentsCache.get(topicId);
 
   const fbData = await loadFromFbCache(`studyContents/${topicId}`);
