@@ -43,19 +43,17 @@ app.use((err, req, res, _next) => {
     res.status(500).json({ error: { message: err.message || "Internal server error" } });
 });
 
-// ─── Scheduled notifications cron (10 times per day — every 2.5 hours) ────────
+// ─── Scheduled notifications cron (every 2 hours during active day) ──────────
 const { processScheduledNotifications } = require("./services/notifications.service");
-cron.schedule("0 6,8,10,12,14,16,18,20,22,0 * * *", async () => {
-    console.log("Running scheduled notifications check...");
-    console.log("Running scheduled notifications check...");
+cron.schedule("0 8,10,12,14,16,18,20,22 * * *", async () => {
     try { await processScheduledNotifications(); }
     catch (e) { console.error("Cron error:", e.message); }
 }, { timezone: "Asia/Kolkata" });
 
-// ─── Database cleanup cron (every 6 hours) ───────────────────────────────────
-// Removes finished/abandoned rooms, orphaned roomQuestions, and old payment logs
+// ─── Database cleanup cron (Once daily at 3:30 AM IST off-peak) ──────────────
+// Removes finished/abandoned rooms and orphaned roomQuestions
 const { runCleanup } = require("./services/cleanup.service");
-cron.schedule("0 */6 * * *", async () => {
+cron.schedule("30 3 * * *", async () => {
     try { await runCleanup(); }
     catch (e) { console.error("Cleanup cron error:", e.message); }
 }, { timezone: "Asia/Kolkata" });
