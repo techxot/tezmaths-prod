@@ -112,19 +112,15 @@
       }
     },
     "roomQuestions": {
-      ".read": "auth != null",
-      ".write": "auth != null",
       "$roomId": {
-        ".read": "auth != null",
-        ".write": "auth != null"
+        ".read": "auth != null && (root.child('rooms').child($roomId).child('hostId').val() === auth.uid || root.child('rooms').child($roomId).child('players').hasChild(auth.uid))",
+        ".write": "auth != null && root.child('rooms').child($roomId).child('hostId').val() === auth.uid"
       }
     },
     "rooms": {
-      ".indexOn": ["code", "status", "hostId", "createdAt"],
-      ".read": "auth != null",
-      ".write": false,
+      ".indexOn": ["createdAt", "status"],
       "$roomId": {
-        ".read": "auth != null",
+        ".read": "auth != null && (root.child('rooms').child($roomId).child('hostId').val() === auth.uid || root.child('rooms').child($roomId).child('players').hasChild(auth.uid))",
         ".write": "auth != null && (!data.exists() || data.child('hostId').val() === auth.uid || data.child('players').hasChild(auth.uid))",
         "players": {
           ".indexOn": ["userId", "joinedAt"],
@@ -262,12 +258,13 @@
       ".indexOn": ["category", "difficulty", "topicId"]
     },
     "users": {
-      ".read": "auth != null",
-      ".write": false,
-      ".indexOn": ["highScore", "xp", "totalPoints", "createdAt"],
       "$uid": {
         ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
         ".write": "auth != null && auth.token.firebase.sign_in_provider !== 'anonymous' && (auth.uid === $uid || auth.token.admin === true)",
+        "stats": {
+          ".read": "auth != null",
+          ".write": "auth != null && (auth.uid === $uid || auth.token.admin === true)"
+        },
         "contacts": {
           ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
           ".write": "auth != null && auth.uid === $uid"

@@ -1,4 +1,4 @@
-const { db } = require("../config/firebase");
+const { admin, db } = require("../config/firebase");
 const { getFirestore } = require("firebase-admin/firestore");
 
 /**
@@ -22,10 +22,11 @@ async function cleanupOldRooms() {
     let removedCount = 0;
 
     try {
-        // OPTIMIZED: Query only rooms created before cutoff instead of downloading ALL rooms
+        // Query bounded batch of old rooms to avoid downloading massive datasets
         const roomsSnap = await db.ref("rooms")
             .orderByChild("createdAt")
             .endAt(cutoff)
+            .limitToFirst(50)
             .once("value");
         
         if (!roomsSnap.exists()) return { removedRooms: 0 };
@@ -46,12 +47,7 @@ async function cleanupOldRooms() {
         }
 
         if (Object.keys(updates).length > 0) {
-            // Batch in chunks of 500 to avoid multi-path update limits
-            const entries = Object.entries(updates);
-            for (let i = 0; i < entries.length; i += 500) {
-                const chunk = Object.fromEntries(entries.slice(i, i + 500));
-                await db.ref().update(chunk);
-            }
+            await db.ref().update(updates);
         }
 
         console.log(`[Cleanup] Removed ${removedCount} old rooms`);
@@ -63,53 +59,12 @@ async function cleanupOldRooms() {
 }
 
 /**
- * Archives payment logs older than 90 days.
- * OPTIMIZED: Uses orderByChild query to only fetch old logs instead of entire node.
+ * Payment logs are tiny historical audit records (~150 bytes each).
+ * Retained permanently for customer dispute resolution and Razorpay compliance.
+ * Disabled to eliminate wasteful N-user loops and prevent bandwidth consumption.
  */
 async function cleanupOldPaymentLogs() {
-    const cutoff = Date.now() - NINETY_DAYS_MS;
-    let removedCount = 0;
-
-    try {
-        // Payment logs are nested: paymentLogs/{userId}/{logKey}
-        // We can't efficiently query nested timestamps, so we still read the top-level keys
-        // but use shallow read to get only user IDs first, then fetch per-user
-        const databaseURL = process.env.FIREBASE_DATABASE_URL;
-        const shallowRes = await fetch(`${databaseURL}/paymentLogs.json?shallow=true`);
-        const userIds = await shallowRes.json();
-        
-        if (!userIds || Object.keys(userIds).length === 0) return { removedLogs: 0 };
-
-        const updates = {};
-
-        // Process each user's logs individually (small reads)
-        for (const userId of Object.keys(userIds)) {
-            const userLogsSnap = await db.ref(`paymentLogs/${userId}`).once("value");
-            if (!userLogsSnap.exists()) continue;
-
-            const userLogs = userLogsSnap.val();
-            for (const [logKey, logData] of Object.entries(userLogs)) {
-                if (logData?.loggedAt && logData.loggedAt < cutoff) {
-                    updates[`paymentLogs/${userId}/${logKey}`] = null;
-                    removedCount++;
-                }
-            }
-        }
-
-        if (Object.keys(updates).length > 0) {
-            const entries = Object.entries(updates);
-            for (let i = 0; i < entries.length; i += 500) {
-                const chunk = Object.fromEntries(entries.slice(i, i + 500));
-                await db.ref().update(chunk);
-            }
-        }
-
-        console.log(`[Cleanup] Removed ${removedCount} old payment logs`);
-        return { removedLogs: removedCount };
-    } catch (error) {
-        console.error("[Cleanup] cleanupOldPaymentLogs error:", error.message);
-        return { removedLogs: 0, error: error.message };
-    }
+    return { removedLogs: 0 };
 }
 
 /**
