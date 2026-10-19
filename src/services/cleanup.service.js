@@ -69,7 +69,7 @@ async function cleanupOldPaymentLogs() {
 
 /**
  * Removes orphaned roomQuestions entries that have no corresponding room.
- * OPTIMIZED: Uses shallow authenticated reads to get only keys (~2KB) instead of full node data.
+ * OPTIMIZED: Uses shallow reads to get only keys (~2KB) instead of full node data.
  */
 async function cleanupOrphanedRoomQuestions() {
     let removedCount = 0;
@@ -77,30 +77,16 @@ async function cleanupOrphanedRoomQuestions() {
     try {
         const databaseURL = process.env.FIREBASE_DATABASE_URL;
         
-        let authQuery = "";
-        try {
-            const tokenObj = await admin.app().options.credential.getAccessToken();
-            if (tokenObj && tokenObj.access_token) {
-                authQuery = `&access_token=${tokenObj.access_token}`;
-            }
-        } catch (_) {}
-
         // Shallow reads — only download keys, not full data
         const [roomsRes, questionsRes] = await Promise.all([
-            fetch(`${databaseURL}/rooms.json?shallow=true${authQuery}`),
-            fetch(`${databaseURL}/roomQuestions.json?shallow=true${authQuery}`),
+            fetch(`${databaseURL}/rooms.json?shallow=true`),
+            fetch(`${databaseURL}/roomQuestions.json?shallow=true`),
         ]);
-
-        if (!roomsRes.ok || !questionsRes.ok) {
-            console.warn("[Cleanup] Shallow read non-OK response, skipping orphaned questions cleanup");
-            return { removedQuestions: 0 };
-        }
 
         const roomKeys = await roomsRes.json();
         const questionKeys = await questionsRes.json();
 
-        if (!questionKeys || questionKeys.error || Object.keys(questionKeys).length === 0) return { removedQuestions: 0 };
-        if (roomKeys && roomKeys.error) return { removedQuestions: 0 };
+        if (!questionKeys || Object.keys(questionKeys).length === 0) return { removedQuestions: 0 };
 
         const existingRoomIds = new Set(roomKeys ? Object.keys(roomKeys) : []);
         const updates = {};
