@@ -15,8 +15,46 @@ const { db } = require("../config/firebase");
  * Firebase reads per level: 1 ever (until invalidated by admin)
  */
 
+const fs = require("fs");
+const path = require("path");
+
+const QUIZ_CACHE_DIR = path.resolve(__dirname, "../../.cache/quizzes");
+
 const quizCache = new Map(); // in-memory: level → { data, timestamp }
-const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+// ─── Local Disk persistent cache helpers (0 Firebase network reads) ───────────
+
+function loadFromDiskCache(level) {
+  try {
+    const filePath = path.join(QUIZ_CACHE_DIR, `level_${level}.json`);
+    if (fs.existsSync(filePath)) {
+      const raw = fs.readFileSync(filePath, "utf8");
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.data) && parsed.data.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
+function saveToDiskCache(level, data, timestamp) {
+  try {
+    if (!fs.existsSync(QUIZ_CACHE_DIR)) {
+      fs.mkdirSync(QUIZ_CACHE_DIR, { recursive: true });
+    }
+    const filePath = path.join(QUIZ_CACHE_DIR, `level_${level}.json`);
+    fs.writeFileSync(filePath, JSON.stringify({ data, timestamp }));
+  } catch (_) {}
+}
+
+function deleteFromDiskCache(level) {
+  try {
+    const filePath = path.join(QUIZ_CACHE_DIR, `level_${level}.json`);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  } catch (_) {}
+}
 
 // ─── Firebase persistent cache helpers ───────────────────────────────────────
 
@@ -27,6 +65,7 @@ async function loadFromFirebaseCache(level) {
     const entry = snap.val();
     if (!entry || !Array.isArray(entry.data) || entry.data.length === 0) return null;
     if (Date.now() - entry.timestamp >= CACHE_TTL_MS) return null; // expired
+    saveToDiskCache(level, entry.data, entry.timestamp);
     return entry;
   } catch {
     return null;
@@ -34,6 +73,7 @@ async function loadFromFirebaseCache(level) {
 }
 
 async function saveToFirebaseCache(level, data, timestamp) {
+  saveToDiskCache(level, data, timestamp);
   try {
     await db.ref(`_cache/quizzes/${level}`).set({ data, timestamp });
   } catch (err) {
@@ -42,6 +82,7 @@ async function saveToFirebaseCache(level, data, timestamp) {
 }
 
 async function deleteFromFirebaseCache(level) {
+  deleteFromDiskCache(level);
   try {
     await db.ref(`_cache/quizzes/${level}`).remove();
   } catch (_) {}
@@ -51,7 +92,7 @@ async function deleteFromFirebaseCache(level) {
 
 /**
  * Get quizzes for a specific level.
- * Memory (0 Firebase reads) → _cache/quizzes/{level} (~30KB) → /quizzes/{level} (fallback ~30KB).
+ * Memory (0 Firebase reads) → Disk (.cache/quizzes, 0 Firebase reads) → _cache/quizzes/{level} → /quizzes/{level}.
  * Lazy loaded on-demand: NEVER downloads all levels in bulk.
  */
 async function getQuizzesByLevel(level) {
@@ -61,6 +102,14 @@ async function getQuizzesByLevel(level) {
   if (cached && now - cached.timestamp < CACHE_TTL_MS) {
     console.log(`[quiz.service] ⚡ Level ${level} → MEMORY CACHE`);
     return cached.data;
+  }
+
+  // L1.5: Local disk cache — 0 Firebase network reads
+  const diskCached = loadFromDiskCache(level);
+  if (diskCached) {
+    quizCache.set(level, diskCached);
+    console.log(`[quiz.service] 💾 Level ${level} loaded from LOCAL DISK cache — 0 Firebase reads`);
+    return diskCached.data;
   }
 
   // L2: Firebase cache node — survives Railway deploys
