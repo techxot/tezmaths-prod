@@ -71,8 +71,8 @@ async function sendToAllUsers(title, message, redirect = "") {
       success += response.successCount;
       failure += response.failureCount;
 
-      // Clean up invalid tokens from lightweight /fcmTokens only (NEVER touch /users)
-      const staleUpdates = {};
+      // Clean up invalid tokens
+      const removeOps = [];
       response.responses.forEach((r, idx) => {
         if (!r.success) {
           const code = r.error?.code;
@@ -85,16 +85,18 @@ async function sendToAllUsers(title, message, redirect = "") {
           ) {
             const userId = tokenToUser[failedToken];
             if (userId) {
-              staleUpdates[`fcmTokens/${userId}`] = null;
+              removeOps.push(
+                db.ref(`fcmTokens/${userId}`).remove(),
+                db.ref(`users/${userId}/fcmToken`).remove()
+              );
             }
           }
         }
       });
 
-      const staleCount = Object.keys(staleUpdates).length;
-      if (staleCount > 0) {
-        await db.ref().update(staleUpdates);
-        console.log(`[notifications] Cleaned up ${staleCount} stale token(s) via single batched update`);
+      if (removeOps.length > 0) {
+        await Promise.allSettled(removeOps);
+        console.log(`Removed ${removeOps.length / 2} stale token(s)`);
       }
     }
 
