@@ -10,21 +10,21 @@
     },
     "practiceTopics": {
       ".read": "auth != null",
-      ".write": "auth != null",
+      ".write": "auth != null && auth.token.admin === true",
       "$topicId": {
         ".read": "auth != null",
-        ".write": "auth != null"
+        ".write": "auth != null && auth.token.admin === true"
       }
     },
     "practiceQuestions": {
-      ".read": "auth != null",
-      ".write": "auth != null",
+      ".read": false,
+      ".write": "auth != null && auth.token.admin === true",
       "$topicId": {
-        ".read": "auth != null",
-        ".write": "auth != null",
+        ".read": false,
+        ".write": "auth != null && auth.token.admin === true",
         "$level": {
           ".read": "auth != null",
-          ".write": "auth != null"
+          ".write": "auth != null && auth.token.admin === true"
         }
       }
     },
@@ -58,11 +58,15 @@
     },
     "studyTopics": {
       ".read": "auth != null",
-      ".write": "auth != null"
+      ".write": "auth != null && auth.token.admin === true"
     },
     "studyContents": {
-      ".read": "auth != null",
-      ".write": "auth != null"
+      ".read": false,
+      ".write": "auth != null && auth.token.admin === true",
+      "$topicId": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.token.admin === true"
+      }
     },
     "lockStatus": {
       ".read": "auth != null",
@@ -118,7 +122,7 @@
       }
     },
     "rooms": {
-      ".indexOn": ["createdAt", "status"],
+      ".indexOn": ["createdAt", "status", "code"],
       "$roomId": {
         ".read": "auth != null && (root.child('rooms').child($roomId).child('hostId').val() === auth.uid || root.child('rooms').child($roomId).child('players').hasChild(auth.uid))",
         ".write": "auth != null && (!data.exists() || data.child('hostId').val() === auth.uid || data.child('players').hasChild(auth.uid))",
@@ -244,9 +248,13 @@
       }
     },
     "quizzes": {
-      ".read": "auth != null",
+      ".read": false,
       ".write": "auth != null && auth.token.admin === true",
-      ".indexOn": ["level", "category", "difficulty"]
+      ".indexOn": ["level", "category", "difficulty"],
+      "$level": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.token.admin === true"
+      }
     },
     "quizLevels": {
       ".read": "auth != null",
