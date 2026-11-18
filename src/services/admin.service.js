@@ -142,7 +142,7 @@ async function bootstrapUsersCache() {
 // ─── Incremental Sync (Syncs only newly registered users — tiny ~10KB read) ──
 
 let lastNewUsersCheck = 0;
-const SYNC_INTERVAL_MS = 60 * 1000; // Check at most once per minute
+const SYNC_INTERVAL_MS = 15 * 1000; // Check at most every 15 seconds
 
 async function syncNewUsers() {
   const now = Date.now();
@@ -150,16 +150,8 @@ async function syncNewUsers() {
   lastNewUsersCheck = now;
 
   try {
-    // 1. Check live count from _counts node (<0.1 KB)
-    const countSnap = await db.ref("_counts/users").once("value");
-    const liveCount = countSnap.exists() ? (countSnap.val() || 0) : 0;
-    const cachedCount = cachedUsers ? cachedUsers.length : 0;
-    const diff = liveCount > cachedCount ? liveCount - cachedCount : 0;
-
-    // Fetch exactly the count of new users (min 15, max 500 for safety)
-    const fetchLimit = diff > 0 ? Math.min(Math.max(diff, 15), 500) : 15;
-
-    const snap = await db.ref("users").limitToLast(fetchLimit).once("value");
+    // Fetch latest users by profile/createdAt (fast, small ~20KB read)
+    const snap = await db.ref("users").orderByChild("profile/createdAt").limitToLast(50).once("value");
     if (!snap.exists()) return;
 
     const rawData = snap.val();
@@ -176,10 +168,11 @@ async function syncNewUsers() {
     }
 
     if (newUsers.length > 0) {
-      newUsers.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      newUsers.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
       cachedUsers = [...newUsers, ...(cachedUsers || [])];
       cacheTimestamp = Date.now();
       saveToDiskCache(cachedUsers, cacheTimestamp);
+      db.ref(FIREBASE_CACHE_PATH).set({ users: cachedUsers, timestamp: cacheTimestamp }).catch(() => {});
       console.log(`[admin.service] 🔄 Synced ${newUsers.length} newly registered user(s) into cache (total: ${cachedUsers.length})`);
     }
   } catch (err) {
@@ -249,10 +242,7 @@ let contentCacheTimestamp = 0;
 const CONTENT_CACHE_TTL = 12 * 60 * 60 * 1000;
 
 async function getDashboardStats() {
-  // If cachedUsers is already in memory or on disk, use it; otherwise DO NOT download 14MB!
-  if (cachedUsers === null) {
-    loadFromDiskCache();
-  }
+  await bootstrapUsersCache();
 
   let totalUsers = cachedUsers ? cachedUsers.length : 0;
   let totalReferrals = 0;
