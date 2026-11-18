@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { db } = require("../config/firebase");
+const admin = require("firebase-admin");
 
 /**
  * Admin Service — User list with Local Disk and Firebase-backed persistent cache.
@@ -150,43 +151,40 @@ async function syncNewUsers() {
   lastNewUsersCheck = now;
 
   try {
-    // Find the latest user timestamp currently in cache
-    let latestTime = null;
-    if (Array.isArray(cachedUsers) && cachedUsers.length > 0) {
-      for (const u of cachedUsers) {
-        if (u.createdAt) {
-          if (!latestTime || u.createdAt > latestTime) {
-            latestTime = u.createdAt;
+    const token = await admin.app().options.credential.getAccessToken();
+    const dbUrl = admin.app().options.databaseURL;
+    const res = await fetch(`${dbUrl}/users.json?shallow=true`, {
+      headers: { Authorization: "Bearer " + token.access_token },
+    });
+    const allKeysObj = await res.json();
+    if (!allKeysObj || typeof allKeysObj !== "object") return;
+    const allKeys = Object.keys(allKeysObj);
+
+    const existingIds = new Set((cachedUsers || []).map((u) => u.id));
+    const missingUids = allKeys.filter((uid) => !existingIds.has(uid));
+
+    if (missingUids.length === 0) return;
+
+    // Fetch each missing user individually (~1KB per user, 0 bulk download)
+    const newUsers = [];
+    for (const uid of missingUids) {
+      try {
+        const snap = await db.ref(`users/${uid}`).once("value");
+        if (snap.exists()) {
+          const stripped = stripUserToAdminFields(uid, snap.val());
+          if (stripped.email !== "tezmaths@admin.com") {
+            newUsers.push(stripped);
           }
         }
-      }
-    }
-
-    let query = db.ref("users").orderByChild("profile/createdAt");
-    if (latestTime) {
-      query = query.startAt(latestTime);
-    } else {
-      query = query.limitToLast(50);
-    }
-
-    const snap = await query.once("value");
-    if (!snap.exists()) return;
-
-    const rawData = snap.val();
-    const existingIds = new Set((cachedUsers || []).map((u) => u.id));
-    const newUsers = [];
-
-    for (const [id, user] of Object.entries(rawData)) {
-      if (!existingIds.has(id)) {
-        const stripped = stripUserToAdminFields(id, user);
-        if (stripped.email !== "tezmaths@admin.com") {
-          newUsers.push(stripped);
-        }
-      }
+      } catch (_) {}
     }
 
     if (newUsers.length > 0) {
-      newUsers.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      newUsers.sort((a, b) => {
+        const timeA = new Date(a.createdAt || a.lastActivity || 0).getTime();
+        const timeB = new Date(b.createdAt || b.lastActivity || 0).getTime();
+        return timeB - timeA;
+      });
       cachedUsers = [...newUsers, ...(cachedUsers || [])];
       cacheTimestamp = Date.now();
       saveToDiskCache(cachedUsers, cacheTimestamp);
@@ -261,6 +259,7 @@ const CONTENT_CACHE_TTL = 12 * 60 * 60 * 1000;
 
 async function getDashboardStats() {
   await bootstrapUsersCache();
+  await syncNewUsers();
 
   let totalUsers = cachedUsers ? cachedUsers.length : 0;
   let totalReferrals = 0;
