@@ -150,8 +150,26 @@ async function syncNewUsers() {
   lastNewUsersCheck = now;
 
   try {
-    // Fetch latest users by profile/createdAt (fast, small ~20KB read)
-    const snap = await db.ref("users").orderByChild("profile/createdAt").limitToLast(50).once("value");
+    // Find the latest user timestamp currently in cache
+    let latestTime = null;
+    if (Array.isArray(cachedUsers) && cachedUsers.length > 0) {
+      for (const u of cachedUsers) {
+        if (u.createdAt) {
+          if (!latestTime || u.createdAt > latestTime) {
+            latestTime = u.createdAt;
+          }
+        }
+      }
+    }
+
+    let query = db.ref("users").orderByChild("profile/createdAt");
+    if (latestTime) {
+      query = query.startAt(latestTime);
+    } else {
+      query = query.limitToLast(50);
+    }
+
+    const snap = await query.once("value");
     if (!snap.exists()) return;
 
     const rawData = snap.val();
