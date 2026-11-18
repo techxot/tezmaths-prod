@@ -266,6 +266,7 @@
       ".indexOn": ["category", "difficulty", "topicId"]
     },
     "users": {
+      ".indexOn": ["profile/createdAt", "createdAt"],
       "$uid": {
         ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
         ".write": "auth != null && auth.token.firebase.sign_in_provider !== 'anonymous' && (auth.uid === $uid || auth.token.admin === true)",
