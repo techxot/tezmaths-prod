@@ -1,25 +1,25 @@
+const fs = require("fs");
+const path = require("path");
 const { db } = require("../config/firebase");
+const admin = require("firebase-admin");
 
 /**
- * Admin Service — User list with Firebase-backed persistent cache.
+ * Admin Service — User list with Local Disk and Firebase-backed persistent cache.
  *
- * Railway has an ephemeral filesystem — disk cache is wiped on every deploy.
- * We use Firebase _cache/adminUsers to persist the stripped user list across deploys.
- *
- * Read flow:
- *   1. In-memory (cachedUsers array)         — 0 Firebase reads (process lifetime)
- *   2. _cache/adminUsers                     — ~250KB read (survives Railway deploys)
- *   3. Full /users download                  — 18MB (first ever deploy only)
- *      └─ writes stripped result to _cache/adminUsers
- *
- * While running: child_changed/added/removed listeners on /users keep cache current.
- * Each user change = ~5KB incremental update, not 18MB re-download.
+ * Prevents bulk /users downloads (14.12 MB) on cold start:
+ *   1. Local disk cache (.cache/admin-users.json) — 0 Firebase bandwidth
+ *   2. Firebase _cache/adminUsers                — stripped cache
+ *   3. Single-flight mutex (bootstrapPromise)    — prevents concurrent parallel downloads
  */
 
 let cachedUsers = null;
 let cacheTimestamp = 0;
+let bootstrapPromise = null;
 
+const CACHE_DIR = path.join(__dirname, "../../.cache");
+const LOCAL_CACHE_PATH = path.join(CACHE_DIR, "admin-users.json");
 const FIREBASE_CACHE_PATH = "_cache/adminUsers";
+const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days persistent TTL
 
 // Fields to keep per user — heavy nested data stripped
 const ADMIN_FIELDS = [
@@ -57,9 +57,39 @@ function stripUserToAdminFields(id, user) {
   return stripped;
 }
 
-const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days persistent TTL
+// ─── Local Disk Persistent Cache (0 Firebase bandwidth) ──────────────────────
 
-// ─── Firebase persistent cache ────────────────────────────────────────────────
+function loadFromDiskCache() {
+  try {
+    if (fs.existsSync(LOCAL_CACHE_PATH)) {
+      const raw = fs.readFileSync(LOCAL_CACHE_PATH, "utf8");
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.users) && parsed.users.length > 0) {
+        cachedUsers = parsed.users;
+        cacheTimestamp = parsed.timestamp || Date.now();
+        console.log(`[admin.service] ✅ Loaded ${cachedUsers.length} users from LOCAL DISK cache — 0 Firebase reads!`);
+        return true;
+      }
+    }
+  } catch (err) {
+    console.warn("[admin.service] Local disk cache load failed:", err.message);
+  }
+  return false;
+}
+
+function saveToDiskCache(users, timestamp) {
+  try {
+    if (!fs.existsSync(CACHE_DIR)) {
+      fs.mkdirSync(CACHE_DIR, { recursive: true });
+    }
+    fs.writeFileSync(LOCAL_CACHE_PATH, JSON.stringify({ users, timestamp }));
+    console.log(`[admin.service] 💾 Saved ${users.length} users to local disk cache`);
+  } catch (err) {
+    console.warn("[admin.service] Local disk cache save failed:", err.message);
+  }
+}
+
+// ─── Firebase Persistent Cache ────────────────────────────────────────────────
 
 async function loadFromFirebaseCache() {
   try {
@@ -67,11 +97,10 @@ async function loadFromFirebaseCache() {
     if (!snap.exists()) return false;
     const entry = snap.val();
     if (!entry || !Array.isArray(entry.users) || entry.users.length === 0) return false;
-    // Serve persisted stripped users — live listeners keep it fresh
     cachedUsers = entry.users;
     cacheTimestamp = entry.timestamp || Date.now();
-    const sizeKB = Math.round(JSON.stringify(cachedUsers).length / 1024);
-    console.log(`[admin.service] ✅ Loaded ${cachedUsers.length} users from _cache/adminUsers (~${sizeKB} KB) — 0 /users reads`);
+    saveToDiskCache(cachedUsers, cacheTimestamp);
+    console.log(`[admin.service] ✅ Loaded ${cachedUsers.length} users from Firebase _cache/adminUsers`);
     return true;
   } catch (err) {
     console.warn("[admin.service] Firebase cache load failed:", err.message);
@@ -79,38 +108,91 @@ async function loadFromFirebaseCache() {
   }
 }
 
-// ─── Bootstrap ────────────────────────────────────────────────────────────────
+// ─── Bootstrap (Single-flight mutex protected) ────────────────────────────────
 
 async function bootstrapUsersCache() {
   const now = Date.now();
-  if (cachedUsers !== null && now - cacheTimestamp < CACHE_TTL_MS) return; // cache is fresh
+  if (cachedUsers !== null && now - cacheTimestamp < CACHE_TTL_MS) return;
 
-  // L1: Try Firebase cache node first (survives Railway deploys)
-  const fromCache = await loadFromFirebaseCache();
+  // Single-flight mutex: ensure only ONE request fetches at a time
+  if (bootstrapPromise) {
+    return bootstrapPromise;
+  }
 
-  if (!fromCache) {
-    // Cold start — full /users download, one-time cost
-    console.log("[admin.service] 🔄 Cold start — downloading full /users node (one-time)...");
-    const start = Date.now();
-    const snapshot = await db.ref("users").once("value");
-    const elapsed = Date.now() - start;
+  bootstrapPromise = (async () => {
+    try {
+      // Step 1: Try local disk cache first (0 Firebase network reads)
+      if (loadFromDiskCache()) return;
 
-    if (snapshot.exists()) {
-      const data = snapshot.val();
-      const rawMB = (JSON.stringify(data).length / (1024 * 1024)).toFixed(2);
-      cachedUsers = Object.entries(data)
-        .map(([id, u]) => stripUserToAdminFields(id, u))
-        .filter((u) => u.email !== "tezmaths@admin.com")
-        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      // Step 2: Try Firebase _cache/adminUsers
+      const fromFb = await loadFromFirebaseCache();
+      if (fromFb) return;
+
+      // Step 3: Safeguard — NEVER auto-download 14MB /users table!
+      console.warn("[admin.service] ⚠️ No cache found on disk or _cache/adminUsers. Skipping bulk /users download to prevent bandwidth spikes.");
+      cachedUsers = cachedUsers || [];
       cacheTimestamp = Date.now();
-      const strippedKB = Math.round(JSON.stringify(cachedUsers).length / 1024);
-      console.log(`[admin.service] ⚠️  Downloaded ${rawMB} MB in ${elapsed}ms → stripped to ${strippedKB} KB, saving to _cache/adminUsers`);
-      // Save once on cold start
-      await db.ref(FIREBASE_CACHE_PATH).set({ users: cachedUsers, timestamp: cacheTimestamp });
-    } else {
-      cachedUsers = [];
-      cacheTimestamp = Date.now();
+    } finally {
+      bootstrapPromise = null;
     }
+  })();
+
+  return bootstrapPromise;
+}
+
+// ─── Incremental Sync (Syncs only newly registered users — tiny ~10KB read) ──
+
+let lastNewUsersCheck = 0;
+const SYNC_INTERVAL_MS = 15 * 1000; // Check at most every 15 seconds
+
+async function syncNewUsers() {
+  const now = Date.now();
+  if (now - lastNewUsersCheck < SYNC_INTERVAL_MS) return;
+  lastNewUsersCheck = now;
+
+  try {
+    const token = await admin.app().options.credential.getAccessToken();
+    const dbUrl = admin.app().options.databaseURL;
+    const res = await fetch(`${dbUrl}/users.json?shallow=true`, {
+      headers: { Authorization: "Bearer " + token.access_token },
+    });
+    const allKeysObj = await res.json();
+    if (!allKeysObj || typeof allKeysObj !== "object") return;
+    const allKeys = Object.keys(allKeysObj);
+
+    const existingIds = new Set((cachedUsers || []).map((u) => u.id));
+    const missingUids = allKeys.filter((uid) => !existingIds.has(uid));
+
+    if (missingUids.length === 0) return;
+
+    // Fetch each missing user individually (~1KB per user, 0 bulk download)
+    const newUsers = [];
+    for (const uid of missingUids) {
+      try {
+        const snap = await db.ref(`users/${uid}`).once("value");
+        if (snap.exists()) {
+          const stripped = stripUserToAdminFields(uid, snap.val());
+          if (stripped.email !== "tezmaths@admin.com") {
+            newUsers.push(stripped);
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (newUsers.length > 0) {
+      newUsers.sort((a, b) => {
+        const timeA = new Date(a.createdAt || a.lastActivity || 0).getTime();
+        const timeB = new Date(b.createdAt || b.lastActivity || 0).getTime();
+        return timeB - timeA;
+      });
+      cachedUsers = [...newUsers, ...(cachedUsers || [])];
+      cacheTimestamp = Date.now();
+      saveToDiskCache(cachedUsers, cacheTimestamp);
+      db.ref(FIREBASE_CACHE_PATH).set({ users: cachedUsers, timestamp: cacheTimestamp }).catch(() => {});
+      console.log(`[admin.service] 🔄 Synced ${newUsers.length} newly registered user(s) into cache (total: ${cachedUsers.length})`);
+    }
+  } catch (err) {
+    console.warn("[admin.service] New users incremental sync error:", err.message);
   }
 }
 
@@ -118,17 +200,35 @@ async function bootstrapUsersCache() {
 
 async function getUsers({ page = 1, limit = 50, search = "" } = {}) {
   await bootstrapUsersCache();
+  await syncNewUsers();
 
-  let filtered = cachedUsers;
+  let filtered = cachedUsers || [];
   if (search && search.trim()) {
     const q = search.toLowerCase().trim();
-    filtered = cachedUsers.filter(
+    filtered = filtered.filter(
       (u) =>
         (u.username && u.username.toLowerCase().includes(q)) ||
         (u.fullName && u.fullName.toLowerCase().includes(q)) ||
         (u.email && u.email.toLowerCase().includes(q)) ||
         (u.phoneNumber && u.phoneNumber.includes(search.trim()))
     );
+
+    // Search fallback: if not in cache, check if username exists in Firebase index
+    if (filtered.length === 0) {
+      try {
+        const usernameSnap = await db.ref(`usernames/${q}`).once("value");
+        if (usernameSnap.exists()) {
+          const uid = usernameSnap.val();
+          const userSnap = await db.ref(`users/${uid}`).once("value");
+          if (userSnap.exists()) {
+            const singleUser = stripUserToAdminFields(uid, userSnap.val());
+            cachedUsers = [singleUser, ...(cachedUsers || [])];
+            saveToDiskCache(cachedUsers, cacheTimestamp);
+            filtered = [singleUser];
+          }
+        }
+      } catch (_) {}
+    }
   }
 
   const total = filtered.length;
@@ -136,7 +236,7 @@ async function getUsers({ page = 1, limit = 50, search = "" } = {}) {
   const safePage = Math.max(1, Math.min(page, totalPages));
   const startIndex = (safePage - 1) * limit;
   const users = filtered.slice(startIndex, startIndex + limit);
-  const contactsOkCount = cachedUsers.filter((u) => u.contacts?.permissionGranted).length;
+  const contactsOkCount = filtered.filter((u) => u.contacts?.permissionGranted).length;
 
   return { users, total, page: safePage, limit, totalPages, contactsOkCount };
 }
@@ -144,11 +244,13 @@ async function getUsers({ page = 1, limit = 50, search = "" } = {}) {
 async function invalidateCache() {
   cachedUsers = null;
   cacheTimestamp = 0;
-  try { await db.ref(FIREBASE_CACHE_PATH).remove(); } catch (_) {}
-  console.log("[admin.service] Cache invalidated");
+  try {
+    if (fs.existsSync(LOCAL_CACHE_PATH)) fs.unlinkSync(LOCAL_CACHE_PATH);
+  } catch (_) {}
+  console.log("[admin.service] In-memory & disk cache invalidated (Firebase cache preserved)");
 }
 
-// ─── Dashboard stats ──────────────────────────────────────────────────────────
+// ─── Dashboard stats (Lightweight — Never downloads /users) ────────────────────
 
 let cachedQuizCount = null;
 let cachedVideoCount = null;
@@ -157,13 +259,18 @@ const CONTENT_CACHE_TTL = 12 * 60 * 60 * 1000;
 
 async function getDashboardStats() {
   await bootstrapUsersCache();
+  await syncNewUsers();
 
+  let totalUsers = cachedUsers ? cachedUsers.length : 0;
   let totalReferrals = 0;
   let totalPoints = 0;
-  cachedUsers.forEach((u) => {
-    totalReferrals += u.referrals || 0;
-    totalPoints += u.totalPoints || 0;
-  });
+
+  if (cachedUsers && cachedUsers.length > 0) {
+    cachedUsers.forEach((u) => {
+      totalReferrals += u.referrals || 0;
+      totalPoints += u.totalPoints || 0;
+    });
+  }
 
   const now = Date.now();
   if (cachedQuizCount === null || now - contentCacheTimestamp > CONTENT_CACHE_TTL) {
@@ -173,18 +280,7 @@ async function getDashboardStats() {
         const counts = countsSnap.val();
         cachedQuizCount = counts.quizzes || 0;
         cachedVideoCount = counts.videos || 0;
-      } else {
-        // Use shallow=true to get only keys — avoids downloading full 9MB /quizzes node
-        const databaseURL = process.env.FIREBASE_DATABASE_URL;
-        const [quizzesRes, videosRes] = await Promise.all([
-          fetch(`${databaseURL}/quizzes.json?shallow=true`),
-          fetch(`${databaseURL}/videos.json?shallow=true`),
-        ]);
-        const quizzesKeys = await quizzesRes.json();
-        const videosKeys = await videosRes.json();
-        cachedQuizCount = quizzesKeys ? Object.keys(quizzesKeys).length : 0;
-        cachedVideoCount = videosKeys ? Object.keys(videosKeys).length : 0;
-        await db.ref("_counts").set({ quizzes: cachedQuizCount, videos: cachedVideoCount });
+        if (counts.users) totalUsers = Math.max(totalUsers, counts.users);
       }
     } catch (err) {
       console.warn("[admin.service] Content count read failed:", err.message);
@@ -195,11 +291,11 @@ async function getDashboardStats() {
   }
 
   return {
-    totalUsers: cachedUsers.length,
+    totalUsers: totalUsers || 0,
     totalReferrals,
     totalReferralPoints: totalReferrals * 10,
-    totalQuizzes: cachedQuizCount,
-    totalVideos: cachedVideoCount,
+    totalQuizzes: cachedQuizCount || 0,
+    totalVideos: cachedVideoCount || 0,
     totalPointsDistributed: totalPoints,
   };
 }
@@ -209,7 +305,8 @@ async function getReferralStats() {
 
   let totalReferrals = 0;
   const referrers = [];
-  cachedUsers.forEach((u) => {
+  const list = cachedUsers || [];
+  list.forEach((u) => {
     const r = u.referrals || 0;
     totalReferrals += r;
     if (r > 0) referrers.push({ userId: u.id, username: u.username || "Unknown", fullName: u.fullName || u.username || "Unknown", referrals: r, points: r * 10 });
@@ -217,7 +314,7 @@ async function getReferralStats() {
   referrers.sort((a, b) => b.referrals - a.referrals);
 
   return {
-    totalUsers: cachedUsers.length,
+    totalUsers: list.length,
     totalReferrals,
     totalReferralPoints: totalReferrals * 10,
     topReferrers: referrers.slice(0, 20),
