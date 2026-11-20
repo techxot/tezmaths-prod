@@ -244,6 +244,10 @@ async function getUsers({ page = 1, limit = 50, search = "" } = {}) {
 async function invalidateCache() {
   cachedUsers = null;
   cacheTimestamp = 0;
+  cachedQuizCount = null;
+  cachedVideoCount = null;
+  cachedGameplayUsers = null;
+  contentCacheTimestamp = 0;
   try {
     if (fs.existsSync(LOCAL_CACHE_PATH)) fs.unlinkSync(LOCAL_CACHE_PATH);
   } catch (_) {}
@@ -254,6 +258,7 @@ async function invalidateCache() {
 
 let cachedQuizCount = null;
 let cachedVideoCount = null;
+let cachedGameplayUsers = null;
 let contentCacheTimestamp = 0;
 const CONTENT_CACHE_TTL = 12 * 60 * 60 * 1000;
 
@@ -277,10 +282,11 @@ async function getDashboardStats() {
     try {
       const countsSnap = await db.ref("_counts").once("value");
       if (countsSnap.exists()) {
-        const counts = countsSnap.val();
+        const counts = countsSnap.val() || {};
         cachedQuizCount = counts.quizzes || 0;
         cachedVideoCount = counts.videos || 0;
         if (counts.users) totalUsers = Math.max(totalUsers, counts.users);
+        cachedGameplayUsers = counts.gameplayUsers || null;
       }
     } catch (err) {
       console.warn("[admin.service] Content count read failed:", err.message);
@@ -290,6 +296,28 @@ async function getDashboardStats() {
     contentCacheTimestamp = now;
   }
 
+  if (!cachedGameplayUsers) {
+    let quizUsers = 0;
+    let practiceUsers = 0;
+    if (cachedUsers && cachedUsers.length > 0) {
+      cachedUsers.forEach((u) => {
+        if ((u.currentLevel && u.currentLevel > 1) || (u.completedLevels && Object.keys(u.completedLevels).length > 0) || u.totalQuizzesPlayed > 0) {
+          quizUsers++;
+        }
+        if (u.totalPracticeSessions > 0 || u.practiceProgress) {
+          practiceUsers++;
+        }
+      });
+    }
+    cachedGameplayUsers = {
+      quiz: quizUsers,
+      practice: practiceUsers,
+      botBattle: 0,
+      friendBattle: 0,
+    };
+    db.ref("_counts/gameplayUsers").update(cachedGameplayUsers).catch(() => {});
+  }
+
   return {
     totalUsers: totalUsers || 0,
     totalReferrals,
@@ -297,6 +325,12 @@ async function getDashboardStats() {
     totalQuizzes: cachedQuizCount || 0,
     totalVideos: cachedVideoCount || 0,
     totalPointsDistributed: totalPoints,
+    gameplayUsers: cachedGameplayUsers || {
+      quiz: 0,
+      practice: 0,
+      botBattle: 0,
+      friendBattle: 0,
+    },
   };
 }
 
