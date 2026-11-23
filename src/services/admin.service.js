@@ -262,9 +262,9 @@ let cachedVideoCount = null;
 let cachedGameplayUsers = null;
 let cachedGameplayByDate = null;
 let contentCacheTimestamp = 0;
-const CONTENT_CACHE_TTL = 12 * 60 * 60 * 1000;
+const CONTENT_CACHE_TTL = 60 * 1000; // 1 minute TTL for live dashboard counts
 
-async function getDashboardStats() {
+async function getDashboardStats(force = false) {
   await bootstrapUsersCache();
   await syncNewUsers();
 
@@ -280,7 +280,7 @@ async function getDashboardStats() {
   }
 
   const now = Date.now();
-  if (cachedQuizCount === null || now - contentCacheTimestamp > CONTENT_CACHE_TTL) {
+  if (force || cachedQuizCount === null || now - contentCacheTimestamp > CONTENT_CACHE_TTL) {
     try {
       const countsSnap = await db.ref("_counts").once("value");
       if (countsSnap.exists()) {

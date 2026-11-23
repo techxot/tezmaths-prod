@@ -21,7 +21,8 @@ router.get("/users", verifyAdmin, async (req, res) => {
 // GET /api/admin/stats — dashboard stats (totalUsers, referrals, quizzes, videos, points)
 router.get("/stats", verifyAdmin, async (req, res) => {
   try {
-    const stats = await getDashboardStats();
+    const force = req.query.force === "true";
+    const stats = await getDashboardStats(force);
     return res.json(stats);
   } catch (error) {
     console.error("Admin stats error:", error.message);
