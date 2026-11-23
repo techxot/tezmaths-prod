@@ -247,6 +247,7 @@ async function invalidateCache() {
   cachedQuizCount = null;
   cachedVideoCount = null;
   cachedGameplayUsers = null;
+  cachedGameplayByDate = null;
   contentCacheTimestamp = 0;
   try {
     if (fs.existsSync(LOCAL_CACHE_PATH)) fs.unlinkSync(LOCAL_CACHE_PATH);
@@ -259,6 +260,7 @@ async function invalidateCache() {
 let cachedQuizCount = null;
 let cachedVideoCount = null;
 let cachedGameplayUsers = null;
+let cachedGameplayByDate = null;
 let contentCacheTimestamp = 0;
 const CONTENT_CACHE_TTL = 12 * 60 * 60 * 1000;
 
@@ -287,6 +289,7 @@ async function getDashboardStats() {
         cachedVideoCount = counts.videos || 0;
         if (counts.users) totalUsers = Math.max(totalUsers, counts.users);
         cachedGameplayUsers = counts.gameplayUsers || null;
+        cachedGameplayByDate = counts.gameplayByDate || {};
       }
     } catch (err) {
       console.warn("[admin.service] Content count read failed:", err.message);
@@ -331,6 +334,7 @@ async function getDashboardStats() {
       botBattle: 0,
       friendBattle: 0,
     },
+    gameplayByDate: cachedGameplayByDate || {},
   };
 }
 
